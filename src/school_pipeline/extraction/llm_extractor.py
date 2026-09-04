@@ -102,6 +102,11 @@ def _normalize_events_field(events):
             return events
         return _normalize_events_field(parsed)
     if isinstance(events, dict):
+        # 実際に本番で頻発したケース: "events" の中身が配列ではなく
+        # {"events": [...]} というオブジェクト全体をもう一段階JSON文字列化
+        # したもの(を↑でパースした結果)になっている。中の配列を取り出す。
+        if "events" in events:
+            return _normalize_events_field(events["events"])
         # 1件だけの予定を配列でなくオブジェクトそのもので返してしまったケース。
         if "type" in events and "date" in events:
             return [events]

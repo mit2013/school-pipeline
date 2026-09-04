@@ -209,6 +209,37 @@ def test_extract_recovers_when_events_is_a_json_encoded_string():
     assert events[0].title == "週末課題 A-1"
 
 
+def test_extract_recovers_when_events_is_a_json_encoded_wrapper_object():
+    # 実際に本番で頻発した崩れ方: "events" の中身が配列そのものではなく、
+    # {"events": [...]} というトップレベルのオブジェクト全体をもう一段階
+    # JSON文字列化した文字列になっている。
+    raw_event = {
+        "type": "assignment",
+        "title": "英語長文チャレンジ B-1 提出",
+        "date": "2026-09-07",
+        "description": "",
+        "confidence": 0.9,
+    }
+    wrapper_json_string = json.dumps({"events": [raw_event]}, ensure_ascii=False)
+    client = FakeAnthropicClient(
+        {
+            "content": [
+                {
+                    "type": "tool_use",
+                    "name": "record_events",
+                    "input": {"events": wrapper_json_string},
+                }
+            ]
+        }
+    )
+    extractor = AnthropicExtractor(client)
+
+    events = extractor.extract("本文", reference_date=date(2026, 9, 1))
+
+    assert len(events) == 1
+    assert events[0].title == "英語長文チャレンジ B-1 提出"
+
+
 def test_extract_recovers_when_events_is_a_single_object_not_wrapped_in_a_list():
     raw_event = {
         "type": "quiz",
