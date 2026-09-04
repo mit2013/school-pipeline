@@ -137,6 +137,46 @@ def test_extract_skips_non_dict_event_entries_without_dropping_the_rest():
     assert events[0].title == "漢字テスト"
 
 
+def test_extract_raises_one_clear_error_when_response_truncated():
+    # max_tokens に達して応答が途中で切れると、tool_use の input が壊れたJSONに
+    # なり "events" がリストではなくなることがある。以前はこれを1文字ずつ
+    # イテレートして大量の warning ログを出していたので、1件のエラーとして
+    # 検知できることを確認する。
+    truncated_response = {
+        "stop_reason": "max_tokens",
+        "content": [
+            {
+                "type": "tool_use",
+                "name": "record_events",
+                "input": {"events": '...と推測。","subject":"英語","confid'},
+            }
+        ],
+    }
+    client = FakeAnthropicClient(truncated_response)
+    extractor = AnthropicExtractor(client)
+
+    with pytest.raises(LLMExtractionError, match="max_tokens"):
+        extractor.extract("長い本文", reference_date=date(2026, 9, 1))
+
+
+def test_extract_raises_when_events_field_is_not_a_list():
+    client = FakeAnthropicClient(
+        {
+            "content": [
+                {
+                    "type": "tool_use",
+                    "name": "record_events",
+                    "input": {"events": "not-a-list"},
+                }
+            ]
+        }
+    )
+    extractor = AnthropicExtractor(client)
+
+    with pytest.raises(LLMExtractionError):
+        extractor.extract("本文", reference_date=date(2026, 9, 1))
+
+
 def test_extract_raises_when_tool_call_missing():
     client = FakeAnthropicClient({"content": [{"type": "text", "text": "no tool call"}]})
     extractor = AnthropicExtractor(client)

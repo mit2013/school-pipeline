@@ -86,9 +86,22 @@ class AnthropicMessagesClient:
 
 
 def _parse_tool_response(response: dict) -> list[dict]:
+    if response.get("stop_reason") == "max_tokens":
+        # 応答が途中で切れると tool_use の input が壊れたJSONになり、
+        # "events" がリストではなく生テキストの断片になることがある。
+        # そのまま1文字ずつイテレートして大量の警告を出す代わりに、
+        # ここでまとめて1件のエラーとして扱う。
+        raise LLMExtractionError(
+            "Claudeの応答が max_tokens に達し、途中で切れました(本文が長すぎる可能性があります)"
+        )
     for block in response.get("content", []):
         if block.get("type") == "tool_use" and block.get("name") == "record_events":
-            return block.get("input", {}).get("events", [])
+            events = block.get("input", {}).get("events", [])
+            if not isinstance(events, list):
+                raise LLMExtractionError(
+                    f"record_events の 'events' がリスト形式ではありません(型: {type(events).__name__})"
+                )
+            return events
     raise LLMExtractionError("record_events tool call not found in model response")
 
 
