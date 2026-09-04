@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import logging
 from datetime import date, datetime, time
 from typing import Protocol
@@ -99,6 +100,13 @@ def _parse_tool_response(response: dict) -> list[dict]:
     for block in response.get("content", []):
         if block.get("type") == "tool_use" and block.get("name") == "record_events":
             events = block.get("input", {}).get("events", [])
+            if isinstance(events, str):
+                # Claudeがまれに配列を二重にJSONエンコードした文字列として
+                # 返すことがある。妥当なJSON配列であれば救済する。
+                try:
+                    events = json.loads(events)
+                except json.JSONDecodeError:
+                    pass
             if not isinstance(events, list):
                 raise LLMExtractionError(
                     f"record_events の 'events' がリスト形式ではありません(型: {type(events).__name__})"

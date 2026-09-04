@@ -1,3 +1,4 @@
+import json
 from datetime import date, time
 
 import pytest
@@ -175,6 +176,37 @@ def test_extract_raises_when_events_field_is_not_a_list():
 
     with pytest.raises(LLMExtractionError):
         extractor.extract("本文", reference_date=date(2026, 9, 1))
+
+
+def test_extract_recovers_when_events_is_a_json_encoded_string():
+    # Claudeがまれに "events" を(配列そのものではなく)配列をJSON文字列に
+    # エンコードしたものとして返すことがある。実際に何度もこの形で返って
+    # きたケースを再現し、救済できることを確認する。
+    raw_event = {
+        "type": "assignment",
+        "title": "週末課題 A-1",
+        "date": "2026-04-20",
+        "description": "",
+        "confidence": 0.9,
+    }
+    events_json_string = json.dumps([raw_event], ensure_ascii=False)
+    client = FakeAnthropicClient(
+        {
+            "content": [
+                {
+                    "type": "tool_use",
+                    "name": "record_events",
+                    "input": {"events": events_json_string},
+                }
+            ]
+        }
+    )
+    extractor = AnthropicExtractor(client)
+
+    events = extractor.extract("本文", reference_date=date(2026, 9, 1))
+
+    assert len(events) == 1
+    assert events[0].title == "週末課題 A-1"
 
 
 def test_extract_raises_when_tool_call_missing():
