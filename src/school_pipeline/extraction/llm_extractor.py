@@ -51,8 +51,12 @@ class AnthropicExtractor:
         events: list[SchoolEvent] = []
         for raw in raw_events:
             try:
+                if not isinstance(raw, dict):
+                    raise ValueError(f"expected an object, got {type(raw).__name__}")
                 event = _to_school_event(raw)
-            except (KeyError, ValueError) as exc:
+            except (KeyError, ValueError, TypeError) as exc:
+                # 1件が壊れていても、同じ文書から取れた他の正しいイベントまで
+                # 巻き添えで捨てないよう、ここでスキップして処理を続ける。
                 logger.warning("Skipping malformed event from LLM output: %s (%r)", exc, raw)
                 continue
             event.source = source
@@ -72,7 +76,7 @@ class AnthropicMessagesClient:
     def create_message(self, *, system: str, user: str, tool_schema: dict) -> dict:
         response = self._client.messages.create(
             model=self._model,
-            max_tokens=4096,
+            max_tokens=8192,
             system=system,
             messages=[{"role": "user", "content": user}],
             tools=[tool_schema],

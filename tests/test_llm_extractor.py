@@ -116,6 +116,27 @@ def test_extract_skips_malformed_events_without_failing():
     assert events[0].title == "提出物"
 
 
+def test_extract_skips_non_dict_event_entries_without_dropping_the_rest():
+    # LLMの出力が壊れて "events" の要素が文字列など非オブジェクトになる
+    # ケースがある(長い/複雑な文書でJSON生成が乱れた場合など)。
+    # 1件が壊れていても、同じ文書内の他の正しいイベントは失われないことを確認する。
+    good = {
+        "type": "quiz",
+        "title": "漢字テスト",
+        "date": "2026-09-10",
+        "description": "",
+        "confidence": 0.9,
+    }
+    malformed = "2026-09-10"
+    client = FakeAnthropicClient(_tool_response([malformed, good]))
+    extractor = AnthropicExtractor(client)
+
+    events = extractor.extract("本文", reference_date=date(2026, 9, 1))
+
+    assert len(events) == 1
+    assert events[0].title == "漢字テスト"
+
+
 def test_extract_raises_when_tool_call_missing():
     client = FakeAnthropicClient({"content": [{"type": "text", "text": "no tool call"}]})
     extractor = AnthropicExtractor(client)
