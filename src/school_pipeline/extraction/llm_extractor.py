@@ -88,6 +88,30 @@ class AnthropicMessagesClient:
         return response.model_dump()
 
 
+def _normalize_events_field(events):
+    """Claudeが record_events の 'events' を配列以外の形で返すことがある
+    (文字列としてJSONエンコード、あるいは配列ではなくオブジェクトなど)。
+    よくある崩れ方をここでまとめて配列に正規化する。
+    """
+    if isinstance(events, list):
+        return events
+    if isinstance(events, str):
+        try:
+            parsed = json.loads(events)
+        except json.JSONDecodeError:
+            return events
+        return _normalize_events_field(parsed)
+    if isinstance(events, dict):
+        # 1件だけの予定を配列でなくオブジェクトそのもので返してしまったケース。
+        if "type" in events and "date" in events:
+            return [events]
+        # {"0": {...}, "1": {...}} のように、配列ではなく添字付きの
+        # オブジェクトとして返してしまったケース。
+        if events and all(isinstance(k, str) and k.isdigit() for k in events):
+            return [events[k] for k in sorted(events, key=int)]
+    return events
+
+
 def _parse_tool_response(response: dict) -> list[dict]:
     if response.get("stop_reason") == "max_tokens":
         # 応答が途中で切れると tool_use の input が壊れたJSONになり、
@@ -99,14 +123,7 @@ def _parse_tool_response(response: dict) -> list[dict]:
         )
     for block in response.get("content", []):
         if block.get("type") == "tool_use" and block.get("name") == "record_events":
-            events = block.get("input", {}).get("events", [])
-            if isinstance(events, str):
-                # Claudeがまれに配列を二重にJSONエンコードした文字列として
-                # 返すことがある。妥当なJSON配列であれば救済する。
-                try:
-                    events = json.loads(events)
-                except json.JSONDecodeError:
-                    pass
+            events = _normalize_events_field(block.get("input", {}).get("events", []))
             if not isinstance(events, list):
                 raise LLMExtractionError(
                     f"record_events の 'events' がリスト形式ではありません(型: {type(events).__name__})"

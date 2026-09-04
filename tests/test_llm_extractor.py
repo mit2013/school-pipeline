@@ -209,6 +209,48 @@ def test_extract_recovers_when_events_is_a_json_encoded_string():
     assert events[0].title == "週末課題 A-1"
 
 
+def test_extract_recovers_when_events_is_a_single_object_not_wrapped_in_a_list():
+    raw_event = {
+        "type": "quiz",
+        "title": "漢字テスト",
+        "date": "2026-09-10",
+        "description": "",
+        "confidence": 0.9,
+    }
+    client = FakeAnthropicClient(
+        {"content": [{"type": "tool_use", "name": "record_events", "input": {"events": raw_event}}]}
+    )
+    extractor = AnthropicExtractor(client)
+
+    events = extractor.extract("本文", reference_date=date(2026, 9, 1))
+
+    assert len(events) == 1
+    assert events[0].title == "漢字テスト"
+
+
+def test_extract_recovers_when_events_is_an_indexed_object_instead_of_an_array():
+    # 実際に本番で観測した崩れ方: {"0": {...}, "1": {...}} のように、
+    # 配列ではなく添字文字列をキーとするオブジェクトで返ってくることがある。
+    event_0 = {"type": "assignment", "title": "A-1", "date": "2026-04-20", "description": "", "confidence": 0.9}
+    event_1 = {"type": "assignment", "title": "A-2", "date": "2026-04-27", "description": "", "confidence": 0.9}
+    client = FakeAnthropicClient(
+        {
+            "content": [
+                {
+                    "type": "tool_use",
+                    "name": "record_events",
+                    "input": {"events": {"1": event_1, "0": event_0}},
+                }
+            ]
+        }
+    )
+    extractor = AnthropicExtractor(client)
+
+    events = extractor.extract("本文", reference_date=date(2026, 9, 1))
+
+    assert [e.title for e in events] == ["A-1", "A-2"]
+
+
 def test_extract_raises_when_tool_call_missing():
     client = FakeAnthropicClient({"content": [{"type": "text", "text": "no tool call"}]})
     extractor = AnthropicExtractor(client)
