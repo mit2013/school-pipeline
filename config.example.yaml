@@ -1,0 +1,37 @@
+# school_pipeline 設定ファイルの例。
+# コピーして config.yaml として使ってください(config.yaml と secrets/ は .gitignore 済みです)。
+#
+#   cp config.example.yaml config.yaml
+
+anthropic_api_key_env: ANTHROPIC_API_KEY
+anthropic_model: claude-sonnet-5
+
+# Gmailアカウント(学校共通アドレス・専門コース用アドレスなど複数登録可能)
+gmail_accounts:
+  - name: school_common
+    credentials_path: secrets/gmail_common_credentials.json
+    token_path: secrets/gmail_common_token.json
+    query: "newer_than:14d"
+    max_results: 50
+  - name: course_specific
+    credentials_path: secrets/gmail_course_credentials.json
+    token_path: secrets/gmail_course_token.json
+    query: "newer_than:14d"
+    max_results: 50
+
+# 配布プリントPDFを置くフォルダ(通常のテキスト抽出に失敗した場合は自動でOCR)
+pdf_directory: inbox/pdfs
+
+# スマホで撮影したプリント写真を置くフォルダ(OCR)
+image_directory: inbox/photos
+
+# Classroomの投稿など、API非対応の情報を手動でコピペしたテキストファイルを置くフォルダ
+manual_text_directory: inbox/manual
+
+# Googleカレンダー
+google_credentials_path: secrets/calendar_credentials.json
+google_calendar_token_path: secrets/calendar_token.json
+calendar_id: primary   # 専用カレンダーを作ってそのIDを指定することを推奨
+
+# この確信度未満の予定はカレンダーに登録せず、一覧表示のみ行う (0.0〜1.0)
+confidence_threshold: 0.5

@@ -1,0 +1,30 @@
+[project]
+name = "school-pipeline"
+version = "0.1.0"
+description = "学校からのメール・配布プリントなどの予定情報を抽出し、Googleカレンダーへ登録するパイプライン"
+requires-python = ">=3.10"
+dependencies = [
+    "anthropic>=0.40.0",
+    "google-api-python-client>=2.100.0",
+    "google-auth>=2.30.0",
+    "google-auth-oauthlib>=1.2.0",
+    "pdfplumber>=0.11.0",
+    "pytesseract>=0.3.10",
+    "pdf2image>=1.17.0",
+    "Pillow>=10.0.0",
+    "PyYAML>=6.0",
+    "click>=8.1.0",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8.0.0"]
+
+[project.scripts]
+school-pipeline = "school_pipeline.cli:main"
+
+[build-system]
+requires = ["setuptools>=68.0"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["src"]

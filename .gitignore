@@ -1,0 +1,14 @@
+__pycache__/
+*.pyc
+.venv/
+venv/
+.pytest_cache/
+*.egg-info/
+build/
+dist/
+.env
+
+# ローカル運用時に生成される機密情報・入力データ
+config.yaml
+secrets/
+inbox/
