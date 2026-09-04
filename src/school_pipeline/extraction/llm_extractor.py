@@ -123,10 +123,16 @@ def _parse_tool_response(response: dict) -> list[dict]:
         )
     for block in response.get("content", []):
         if block.get("type") == "tool_use" and block.get("name") == "record_events":
-            events = _normalize_events_field(block.get("input", {}).get("events", []))
+            raw_events_field = block.get("input", {}).get("events", [])
+            events = _normalize_events_field(raw_events_field)
             if not isinstance(events, list):
+                # 既知の崩れ方(文字列/単一オブジェクト/添字オブジェクト)の
+                # どれにも当てはまらなかった。原因を切り分けられるよう、
+                # 実際の中身をログに出しておく。
+                logger.error("Unrecognized 'events' shape: %r", raw_events_field)
                 raise LLMExtractionError(
-                    f"record_events の 'events' がリスト形式ではありません(型: {type(events).__name__})"
+                    f"record_events の 'events' がリスト形式ではありません(型: {type(events).__name__})。"
+                    "詳細はログのUnrecognized 'events' shapeを参照してください。"
                 )
             return events
     raise LLMExtractionError("record_events tool call not found in model response")
