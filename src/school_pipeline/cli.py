@@ -5,6 +5,7 @@ import os
 import sys
 
 import click
+from dotenv import load_dotenv
 
 from .calendar_sync.google_calendar import GoogleCalendarSync
 from .config import load_settings
@@ -18,6 +19,10 @@ from .sources.pdf_source import PdfSource
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
 logger = logging.getLogger(__name__)
+
+# カレントディレクトリの .env から環境変数を読み込む(既に設定済みの値は上書きしない)。
+# これにより、school-pipeline実行用のシェルで毎回 export しなくて済む。
+load_dotenv()
 
 _CALENDAR_SCOPES = ["https://www.googleapis.com/auth/calendar"]
 

@@ -62,6 +62,15 @@ brew install tesseract tesseract-lang
 
 ### 3. Anthropic APIキー
 
+`.env` ファイルに保存しておくのがおすすめです(毎回 `export` する必要がなくなります。`.env` は `.gitignore` 済みです)。
+
+```bash
+cp .env.example .env
+# .env を開いて ANTHROPIC_API_KEY=sk-ant-... の部分を実際のキーに書き換える
+```
+
+シェルの環境変数として都度設定したい場合は、代わりに以下でも構いません(その場合、そのシェルではClaude Code自体のログインより優先されてしまう点に注意してください):
+
 ```bash
 export ANTHROPIC_API_KEY="sk-ant-..."
 ```
