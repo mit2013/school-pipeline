@@ -12,3 +12,4 @@ dist/
 config.yaml
 secrets/
 inbox/
+.school_pipeline_cache.json

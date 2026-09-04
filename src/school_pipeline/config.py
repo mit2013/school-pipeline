@@ -27,6 +27,7 @@ class Settings:
     google_calendar_token_path: str = "calendar_token.json"
     calendar_id: str = "primary"
     confidence_threshold: float = 0.5
+    cache_path: str = ".school_pipeline_cache.json"
 
 
 def load_settings(path: str | Path) -> Settings:
@@ -44,4 +45,5 @@ def load_settings(path: str | Path) -> Settings:
         google_calendar_token_path=data.get("google_calendar_token_path", "calendar_token.json"),
         calendar_id=data.get("calendar_id", "primary"),
         confidence_threshold=float(data.get("confidence_threshold", 0.5)),
+        cache_path=data.get("cache_path", ".school_pipeline_cache.json"),
     )

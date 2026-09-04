@@ -35,3 +35,6 @@ calendar_id: primary   # 専用カレンダーを作ってそのIDを指定す�
 
 # この確信度未満の予定はカレンダーに登録せず、一覧表示のみ行う (0.0〜1.0)
 confidence_threshold: 0.5
+
+# 内容が変わっていないファイルの再抽出(=再課金)を防ぐキャッシュの保存先
+cache_path: .school_pipeline_cache.json

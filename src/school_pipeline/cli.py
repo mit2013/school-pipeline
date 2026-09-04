@@ -9,6 +9,7 @@ import click
 from .calendar_sync.google_calendar import GoogleCalendarSync
 from .config import load_settings
 from .extraction.llm_extractor import AnthropicExtractor, AnthropicMessagesClient
+from .pipeline.cache import ExtractionCache
 from .pipeline.runner import PipelineResult, run_pipeline
 from .sources.gmail_source import GmailAccountConfig, GmailSource
 from .sources.image_source import ImageSource
@@ -33,7 +34,13 @@ def main() -> None:
     default=False,
     help="実際にGoogleカレンダーへ書き込む(指定しない場合は差分の確認のみ)",
 )
-def run(config_path: str, push: bool) -> None:
+@click.option(
+    "--force",
+    is_flag=True,
+    default=False,
+    help="キャッシュを無視し、内容が変わっていないファイルも含めてすべて再抽出する",
+)
+def run(config_path: str, push: bool, force: bool) -> None:
     settings = load_settings(config_path)
 
     sources = _build_sources(settings)
@@ -51,7 +58,15 @@ def run(config_path: str, push: bool) -> None:
         sys.exit(1)
     extractor = AnthropicExtractor(AnthropicMessagesClient(api_key=api_key, model=settings.anthropic_model))
 
-    result = run_pipeline(sources, extractor, confidence_threshold=settings.confidence_threshold)
+    cache = ExtractionCache.load(settings.cache_path)
+    result = run_pipeline(
+        sources,
+        extractor,
+        confidence_threshold=settings.confidence_threshold,
+        cache=cache,
+        force=force,
+    )
+    cache.save(settings.cache_path)
     _print_report(result)
 
     if not result.events:

@@ -7,6 +7,7 @@ from typing import Protocol
 
 from ..models import SchoolEvent, SourceRef
 from ..sources.base import Source
+from .cache import ExtractionCache
 from .dedup import dedup_events, find_possible_duplicates
 
 logger = logging.getLogger(__name__)
@@ -30,15 +31,32 @@ def run_pipeline(
     extractor: Extractor,
     *,
     confidence_threshold: float = 0.5,
+    cache: ExtractionCache | None = None,
+    force: bool = False,
 ) -> PipelineResult:
     all_events: list[SchoolEvent] = []
     for source in sources:
         for doc in source.fetch():
+            source_key = f"{doc.source.source_type}:{doc.source.source_id}"
+            content_hash = ExtractionCache.content_hash(doc.text)
+
+            if cache is not None and not force:
+                cached_events = cache.get(source_key, content_hash)
+                if cached_events is not None:
+                    logger.info("Using cached extraction for %s (unchanged since last run)", doc.source.label)
+                    for ev in cached_events:
+                        ev.source = doc.source
+                    all_events.extend(cached_events)
+                    continue
+
             try:
                 events = extractor.extract(doc.text, reference_date=doc.reference_date, source=doc.source)
             except Exception:
                 logger.exception("Extraction failed for %s", doc.source.label)
                 continue
+
+            if cache is not None:
+                cache.put(source_key, content_hash, events)
             all_events.extend(events)
 
     deduped = dedup_events(all_events)
