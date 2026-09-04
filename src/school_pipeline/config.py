@@ -31,7 +31,8 @@ class Settings:
 
 def load_settings(path: str | Path) -> Settings:
     data = yaml.safe_load(Path(path).read_text(encoding="utf-8")) or {}
-    accounts = [GmailAccountSettings(**acc) for acc in data.get("gmail_accounts", [])]
+    # "gmail_accounts:" left with no entries parses as None, not an empty list.
+    accounts = [GmailAccountSettings(**acc) for acc in (data.get("gmail_accounts") or [])]
     return Settings(
         anthropic_api_key_env=data.get("anthropic_api_key_env", "ANTHROPIC_API_KEY"),
         anthropic_model=data.get("anthropic_model", "claude-sonnet-5"),
