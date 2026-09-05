@@ -10,6 +10,7 @@ dist/
 
 # ローカル運用時に生成される機密情報・入力データ
 config.yaml
+exclusions.yaml
 secrets/
 inbox/
 .school_pipeline_cache.json

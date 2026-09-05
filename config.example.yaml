@@ -39,6 +39,19 @@ calendar_id: primary   # 専用カレンダーを作ってそのIDを指定す�
 # この確信度未満の予定はカレンダーに登録せず、一覧表示のみ行う (0.0〜1.0)
 confidence_threshold: 0.5
 
+# カレンダーに載せたくない予定を指定するルールファイル
+# (exclusions.example.yaml をコピーして使う。exclusions.yaml は .gitignore 済み)
+exclusions_path: exclusions.yaml
+
+# 終日イベントがこの日数を超えて続く場合、日付が特定できていない疑いがあるとみなして
+# 確信度を下げる。「9月中のどこか1日」のような連絡が、月まるごとの予定として
+# 登録されてしまうのを防ぐため。
+max_span_days: 14
+
+# 自分の子どものクラス。同じ種類のプリントがクラス別・担当者別に別バージョンで
+# 配られることがあるため、対象が違う資料を取り込んだときに警告を出すのに使う。
+my_class: "1組"
+
 # 内容が変わっていないファイルの再抽出(=再課金)を防ぐキャッシュの保存先
 cache_path: .school_pipeline_cache.json
 

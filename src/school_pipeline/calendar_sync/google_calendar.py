@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import logging
 from dataclasses import dataclass
+from dataclasses import field as dataclass_field
 from datetime import date, timedelta
 
 from ..models import EventType, SchoolEvent
@@ -30,6 +31,10 @@ class SyncStats:
     unchanged: int = 0
     # 人が手で編集したため、上書きせず残した予定の件数。
     skipped_manual: int = 0
+    # 抽出結果に無くなったため削除した予定の件数。
+    deleted: int = 0
+    # パイプラインが登録したが、今回の抽出結果には無い予定(カレンダー上の生データ)。
+    orphans: list = dataclass_field(default_factory=list)
 
 
 class GoogleCalendarSync:
@@ -52,12 +57,29 @@ class GoogleCalendarSync:
         self._timezone = timezone
         self._overwrite_manual_edits = overwrite_manual_edits
 
-    def sync(self, events: list[SchoolEvent], *, dry_run: bool = True) -> SyncStats:
+    def sync(
+        self,
+        events: list[SchoolEvent],
+        *,
+        dry_run: bool = True,
+        prune: bool = False,
+        keep_ids: set | None = None,
+    ) -> SyncStats:
+        """抽出結果をカレンダーへ反映する。
+
+        keep_ids には「今回は登録しないが、消してもいけない予定」の識別子を渡す。
+        確信度がしきい値を少し下回っただけの予定がここに入る。抽出のたびに確信度は
+        多少ぶれるので、これが無いと 0.5 前後の予定が登録と削除を交互に繰り返す。
+        """
         existing_by_stable_id = self._load_existing(events)
         stats = SyncStats()
+        # 実際に照合できた既存予定のキー。どれとも結びつかなかったものが孤児になる。
+        matched_keys: set[str] = set()
         for event in events:
             body = _to_calendar_body(event, self._timezone)
-            existing = existing_by_stable_id.get(event.stable_id)
+            existing, matched_key = self._find_existing(existing_by_stable_id, event)
+            if matched_key:
+                matched_keys.add(matched_key)
             if existing is None:
                 stats.created += 1
                 logger.info("[CREATE] %s %s", event.date, event.title)
@@ -67,7 +89,9 @@ class GoogleCalendarSync:
                 # 家族が手で直した予定を、抽出結果で黙って戻さない。
                 stats.skipped_manual += 1
                 logger.info("[SKIP] %s %s (手動で編集されているため上書きしません)", event.date, event.title)
-            elif _needs_update(existing, body, self._timezone):
+            elif matched_key != event.stable_id or _needs_update(existing, body, self._timezone):
+                # 旧形式の識別子で見つけた場合は内容が同じでも書き戻す。そうしないと
+                # 新しい識別子が保存されず、いつまでも移行が終わらない。
                 stats.updated += 1
                 logger.info("[UPDATE] %s %s", event.date, event.title)
                 if not dry_run:
@@ -76,7 +100,67 @@ class GoogleCalendarSync:
                     ).execute()
             else:
                 stats.unchanged += 1
+
+        self._collect_orphans(
+            matched_keys | (keep_ids or set()),
+            existing_by_stable_id,
+            stats,
+            dry_run=dry_run,
+            prune=prune,
+        )
         return stats
+
+    def _find_existing(self, existing_by_stable_id: dict[str, dict], event: SchoolEvent):
+        """カレンダー上の対応する予定を探す。(見つかった予定, 照合に使ったキー)。
+
+        識別子の付け方を変えたときに、既存の登録が全部「別物」に見えてしまうと、
+        削除して入れ直すことになり、手で編集された内容が失われる。そうならないよう、
+        新しい識別子で見つからなければ旧形式の識別子でも探す。見つかれば更新扱いに
+        なり、その際に新しい識別子が書き込まれるので、次回からは移行済みになる。
+        """
+        found = existing_by_stable_id.get(event.stable_id)
+        if found is not None:
+            return found, event.stable_id
+        legacy = event.legacy_stable_id
+        if legacy != event.stable_id:
+            found = existing_by_stable_id.get(legacy)
+            if found is not None:
+                logger.info("[MIGRATE] %s %s (識別子を新形式へ移行します)", event.date, event.title)
+                return found, legacy
+        return None, None
+
+    def _collect_orphans(
+        self,
+        matched_keys: set,
+        existing_by_stable_id: dict[str, dict],
+        stats: SyncStats,
+        *,
+        dry_run: bool,
+        prune: bool,
+    ) -> None:
+        """パイプラインが登録したのに、今回の抽出結果には無い予定を洗い出す。
+
+        提出日が変わって古い日付の予定が取り残された場合や、除外ルールで
+        外した場合、資料そのものを inbox から消した場合に発生する。
+        報告は常に行い、削除は prune を指定したときだけ行う。資料を一時的に
+        退避しただけで予定が消えると困るため、既定では消さない。
+        """
+        for stable_id, item in existing_by_stable_id.items():
+            if stable_id in matched_keys:
+                continue
+            if self._was_edited_by_hand(item):
+                # 手で直された予定は、本人が必要としている可能性が高いので残す。
+                stats.skipped_manual += 1
+                logger.info("[SKIP] %s (手動で編集されているため削除しません)", item.get("summary"))
+                continue
+            stats.orphans.append(item)
+            if not prune:
+                logger.info("[ORPHAN] %s (--prune を付けると削除します)", item.get("summary"))
+                continue
+            stats.deleted += 1
+            logger.info("[DELETE] %s", item.get("summary"))
+            if not dry_run:
+                self._service.events().delete(calendarId=self._calendar_id, eventId=item["id"]).execute()
 
     def _was_edited_by_hand(self, existing: dict) -> bool:
         """カレンダー上の予定が、前回パイプラインが書いた内容から変わっているか。

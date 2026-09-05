@@ -1,0 +1,31 @@
+# カレンダーに載せたくない予定のルール。
+# コピーして exclusions.yaml として使ってください(exclusions.yaml は .gitignore 済みです)。
+#
+#   cp exclusions.example.yaml exclusions.yaml
+#
+# 抽出そのものは止めません。資料に書いてある事実は変わりませんし、抽出をやめても
+# 再抽出の費用が浮くわけでもないためです。抽出したあとで、カレンダーへの登録対象から
+# 外すだけです。すでに登録済みの予定は `school-pipeline run --push --prune` で消えます。
+#
+# ルールは `school-pipeline exclude --title-contains ...` でも追記できます。
+
+exclusions:
+  # 条件は AND で組み合わさります。条件を足すほど対象は狭くなります。
+  #
+  # - title_contains:         予定のタイトルに含まれる文字列(全角/半角・大小文字は無視)
+  # - identity:               予定の識別子。課題番号など(例: "B-1")
+  # - subject:                科目名(例: "英語")
+  # - source_label_contains:  出典のファイル名や件名に含まれる文字列
+  # - type:                   school_event / quiz / exam / assignment / other
+  # - reason:                 なぜ除外したかのメモ(動作には影響しません)
+
+  # 例: 自分の子には関係のない検査項目を、種別と出典で絞って外す
+  # - title_contains: 服装検査
+  #   type: school_event
+  #   source_label_contains: 検査
+  #   reason: 本人に該当しないため
+
+  # 例: 特定の課題1件だけを外す
+  # - identity: B-1
+  #   subject: 英語
+  #   reason: 提出済み

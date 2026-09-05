@@ -17,6 +17,7 @@ class FakeEventsResource:
         self._existing_items = existing_items
         self.inserted: list[dict] = []
         self.updated: list[tuple[str, dict]] = []
+        self.deleted: list[str] = []
         self.list_kwargs: list[dict] = []
 
     def list(self, **kwargs):
@@ -30,6 +31,10 @@ class FakeEventsResource:
     def update(self, calendarId, eventId, body):
         self.updated.append((eventId, body))
         return _Execuable({"id": eventId})
+
+    def delete(self, calendarId, eventId):
+        self.deleted.append(eventId)
+        return _Execuable({})
 
 
 class FakeCalendarService:
@@ -267,3 +272,148 @@ def test_new_events_are_written_with_a_signature():
 
     private = service.events().inserted[0]["extendedProperties"]["private"]
     assert private["school_pipeline_synced"]
+
+
+def test_orphans_are_reported_but_not_deleted_without_prune():
+    """資料を一時的に退避しただけで予定が消えると困るので、既定では消さない。"""
+    stale = _synced_existing(_event(date=date(2026, 9, 7)))
+    service = FakeCalendarService(existing_items=[stale])
+    syncer = GoogleCalendarSync(service, calendar_id="primary")
+
+    stats = syncer.sync([_event(date=date(2026, 9, 15))], dry_run=False)
+
+    assert len(stats.orphans) == 1
+    assert stats.deleted == 0
+    assert service.events().deleted == []
+
+
+def test_prune_deletes_events_that_are_no_longer_extracted():
+    stale = _synced_existing(_event(date=date(2026, 9, 7)))
+    service = FakeCalendarService(existing_items=[stale])
+    syncer = GoogleCalendarSync(service, calendar_id="primary")
+
+    stats = syncer.sync([_event(date=date(2026, 9, 15))], dry_run=False, prune=True)
+
+    assert stats.deleted == 1
+    assert service.events().deleted == ["existing-id"]
+
+
+def test_prune_dry_run_counts_but_does_not_delete():
+    stale = _synced_existing(_event(date=date(2026, 9, 7)))
+    service = FakeCalendarService(existing_items=[stale])
+    syncer = GoogleCalendarSync(service, calendar_id="primary")
+
+    stats = syncer.sync([_event(date=date(2026, 9, 15))], dry_run=True, prune=True)
+
+    assert stats.deleted == 1
+    assert service.events().deleted == []
+
+
+def test_prune_keeps_hand_edited_events():
+    """手で直された予定は、本人が必要としている可能性が高いので消さない。"""
+    stale = _synced_existing(_event(date=date(2026, 9, 7)))
+    stale["description"] = "範囲: 教科書p1-50\n持ち物メモ"  # 家族が追記した
+
+    service = FakeCalendarService(existing_items=[stale])
+    syncer = GoogleCalendarSync(service, calendar_id="primary")
+
+    stats = syncer.sync([_event(date=date(2026, 9, 15))], dry_run=False, prune=True)
+
+    assert stats.deleted == 0
+    assert stats.skipped_manual == 1
+    assert service.events().deleted == []
+
+
+def test_events_still_extracted_are_never_orphans():
+    event = _event()
+    service = FakeCalendarService(existing_items=[_synced_existing(event)])
+    syncer = GoogleCalendarSync(service, calendar_id="primary")
+
+    stats = syncer.sync([event], dry_run=False, prune=True)
+
+    assert stats.orphans == []
+    assert stats.deleted == 0
+
+
+def test_date_change_moves_the_event_instead_of_creating_a_duplicate():
+    """identity_key を持つ予定は、提出日が変わっても同じ予定を更新すること。"""
+    before = _event(date=date(2026, 9, 7), identity_key="B-1", subject="英語")
+    after = _event(date=date(2026, 9, 14), identity_key="B-1", subject="英語")
+    service = FakeCalendarService(existing_items=[_synced_existing(before)])
+    syncer = GoogleCalendarSync(service, calendar_id="primary")
+
+    stats = syncer.sync([after], dry_run=False, prune=True)
+
+    assert (stats.created, stats.updated, stats.deleted) == (0, 1, 0)
+    assert service.events().updated[0][1]["start"] == {"date": "2026-09-14"}
+
+
+def _legacy_existing(event) -> dict:
+    """identity_key 導入前の形式(旧IDのみ)で登録されている既存予定。"""
+    from school_pipeline.calendar_sync.google_calendar import _to_calendar_body
+
+    plain = _event(
+        type=event.type, title=event.title, date=event.date, subject=event.subject,
+        description=event.description, confidence=event.confidence,
+    )
+    body = _to_calendar_body(plain, "Asia/Tokyo")
+    return {"id": "legacy-id", **body}
+
+
+def test_legacy_ids_are_migrated_instead_of_recreated():
+    """識別子の形式を変えたときに、既存の登録が全部作り直しにならないこと。
+
+    作り直すと、家族が手で書き足した内容がその過程で失われる。
+    """
+    event = _event(identity_key="B-5", subject="英語")
+    service = FakeCalendarService(existing_items=[_legacy_existing(event)])
+    syncer = GoogleCalendarSync(service, calendar_id="primary")
+
+    stats = syncer.sync([event], dry_run=False, prune=True)
+
+    assert (stats.created, stats.updated, stats.deleted) == (0, 1, 0)
+    assert stats.orphans == []
+    eventId, body = service.events().updated[0]
+    assert eventId == "legacy-id"
+    # 更新の際に新しい識別子が書き込まれ、次回からは移行済みになる。
+    assert body["extendedProperties"]["private"]["school_pipeline_id"] == event.stable_id
+
+
+def test_migration_does_not_resurrect_events_whose_date_moved():
+    """日付が変わった予定は旧IDでは見つからないので、古いほうは削除候補に残る。"""
+    moved = _event(date=date(2026, 9, 14), identity_key="B-1", subject="英語")
+    stale = _legacy_existing(_event(date=date(2026, 9, 7), identity_key="B-1", subject="英語"))
+    service = FakeCalendarService(existing_items=[stale])
+    syncer = GoogleCalendarSync(service, calendar_id="primary")
+
+    stats = syncer.sync([moved], dry_run=False)
+
+    assert stats.created == 1
+    assert len(stats.orphans) == 1
+
+
+def test_keep_ids_protect_events_from_being_pruned():
+    """確信度がわずかに下がっただけの予定を、削除してしまわないこと。
+
+    抽出のたびに確信度は多少ぶれる。保護が無いと、しきい値付近の予定が
+    実行のたびに登録と削除を繰り返すことになる。
+    """
+    borderline = _event(identity_key="漢字小テスト第1回", subject="現代文")
+    service = FakeCalendarService(existing_items=[_synced_existing(borderline)])
+    syncer = GoogleCalendarSync(service, calendar_id="primary")
+
+    stats = syncer.sync([], dry_run=False, prune=True, keep_ids={borderline.stable_id})
+
+    assert stats.deleted == 0
+    assert stats.orphans == []
+    assert service.events().deleted == []
+
+
+def test_unprotected_events_are_still_pruned():
+    unwanted = _event(identity_key="メイクチェック")
+    service = FakeCalendarService(existing_items=[_synced_existing(unwanted)])
+    syncer = GoogleCalendarSync(service, calendar_id="primary")
+
+    stats = syncer.sync([], dry_run=False, prune=True, keep_ids={"別の予定のID"})
+
+    assert stats.deleted == 1

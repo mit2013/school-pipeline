@@ -74,6 +74,8 @@ def _serialize_event(event: SchoolEvent) -> dict:
         "location": event.location,
         "description": event.description,
         "confidence": event.confidence,
+        "identity_key": event.identity_key,
+        "audience": event.audience,
     }
 
 
@@ -90,4 +92,6 @@ def _deserialize_event(data: dict) -> SchoolEvent:
         location=data.get("location"),
         description=data.get("description", ""),
         confidence=data.get("confidence", 1.0),
+        identity_key=data.get("identity_key"),
+        audience=data.get("audience"),
     )

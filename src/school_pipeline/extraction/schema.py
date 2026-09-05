@@ -9,6 +9,14 @@ EVENT_TOOL_SCHEMA = {
     "input_schema": {
         "type": "object",
         "properties": {
+            "audience": {
+                "type": ["string", "null"],
+                "description": (
+                    "この資料が誰向けかを本文から読み取って書く(例: 「3,4,5,12組」「B先生担当クラス」"
+                    "「特進コース」)。同じ種類の資料がクラス別・担当者別に別バージョンで"
+                    "配られることがあり、それらを取り違えないために使う。本文に明記が無ければ null。"
+                ),
+            },
             "events": {
                 "type": "array",
                 "items": {
@@ -23,6 +31,21 @@ EVENT_TOOL_SCHEMA = {
                             ),
                         },
                         "title": {"type": "string", "description": "予定の短いタイトル"},
+                        "identity_key": {
+                            "type": ["string", "null"],
+                            "description": (
+                                "日付が変わってもこの予定を同じものだと特定できる短いキー。"
+                                "課題番号・試験名など、その予定に固有の記号や番号を使う。"
+                                "資料によって呼び方が違っても同じキーになるよう、呼称ではなく"
+                                "番号・記号を中心に書くこと。"
+                                "例: 「週末課題 B-1 提出」「長文B-1」「長文問題集のB-1」は"
+                                "いずれも identity_key を「B-1」にする。"
+                                "「2学期中間試験」は「2学期中間試験」、"
+                                "「漢字小テスト第2回」は「漢字小テスト第2回」。"
+                                "科目名は含めないこと(科目は subject に入れる)。"
+                                "番号や固有の名前が無く、日付でしか区別できない予定は null。"
+                            ),
+                        },
                         "date": {
                             "type": "string",
                             "description": (
@@ -45,6 +68,15 @@ EVENT_TOOL_SCHEMA = {
                         "subject": {
                             "type": ["string", "null"],
                             "description": "科目名(数学・英語など)。学校全体の行事はnull。",
+                        },
+                        "audience": {
+                            "type": ["string", "null"],
+                            "description": (
+                                "この予定だけが特定のクラス向けである場合に、その対象を書く"
+                                "(例: 「3・4・5・A組」)。1つの連絡の中でクラスごとに違う日程が"
+                                "示されている場合は、必ず予定ごとにここを埋めること。"
+                                "資料全体で共通なら null (その場合は全体の audience が使われる)。"
+                            ),
                         },
                         "location": {"type": ["string", "null"]},
                         "description": {

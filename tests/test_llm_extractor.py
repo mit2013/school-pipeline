@@ -321,3 +321,55 @@ def test_fingerprint_is_stable_across_calls():
     from school_pipeline.extraction.llm_extractor import extraction_fingerprint
 
     assert extraction_fingerprint("claude-sonnet-5") == extraction_fingerprint("claude-sonnet-5")
+
+
+def _tool_response_with_audience(events: list[dict], audience) -> dict:
+    return {
+        "content": [
+            {
+                "type": "tool_use",
+                "name": "record_events",
+                "input": {"audience": audience, "events": events},
+            }
+        ]
+    }
+
+
+def _raw(**overrides) -> dict:
+    raw = {
+        "type": "assignment",
+        "title": "週末課題 B-1 提出",
+        "date": "2026-09-07",
+        "subject": "英語",
+        "description": "週末課題の提出日",
+        "confidence": 0.9,
+    }
+    raw.update(overrides)
+    return raw
+
+
+def test_extract_reads_identity_key():
+    client = FakeAnthropicClient(_tool_response([_raw(identity_key="B-1")]))
+    events = AnthropicExtractor(client).extract("本文", reference_date=date(2026, 9, 1))
+    assert events[0].identity_key == "B-1"
+
+
+def test_identity_key_is_none_when_absent_or_empty():
+    client = FakeAnthropicClient(_tool_response([_raw(), _raw(identity_key="")]))
+    events = AnthropicExtractor(client).extract("本文", reference_date=date(2026, 9, 1))
+    assert [e.identity_key for e in events] == [None, None]
+
+
+def test_audience_is_applied_to_every_event_from_the_document():
+    """対象クラスは資料全体の属性なので、その資料から取れた全予定に付く。"""
+    client = FakeAnthropicClient(
+        _tool_response_with_audience([_raw(identity_key="B-1"), _raw(identity_key="B-2")], "3,4,5,12組")
+    )
+    events = AnthropicExtractor(client).extract("本文", reference_date=date(2026, 9, 1))
+    assert [e.audience for e in events] == ["3,4,5,12組", "3,4,5,12組"]
+
+
+def test_missing_audience_becomes_none():
+    client = FakeAnthropicClient(_tool_response_with_audience([_raw()], None))
+    events = AnthropicExtractor(client).extract("本文", reference_date=date(2026, 9, 1))
+    assert events[0].audience is None
