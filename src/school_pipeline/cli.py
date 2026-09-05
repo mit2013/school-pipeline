@@ -46,7 +46,13 @@ def main() -> None:
     default=False,
     help="キャッシュを無視し、内容が変わっていないファイルも含めてすべて再抽出する",
 )
-def run(config_path: str, push: bool, force: bool) -> None:
+@click.option(
+    "--overwrite-manual",
+    is_flag=True,
+    default=False,
+    help="手動で編集された予定も抽出結果で上書きする(通常は保護して残します)",
+)
+def run(config_path: str, push: bool, force: bool, overwrite_manual: bool) -> None:
     settings = load_settings(config_path)
 
     sources = _build_sources(settings)
@@ -80,15 +86,24 @@ def run(config_path: str, push: bool, force: bool) -> None:
         return
 
     service = _build_calendar_service(settings)
-    syncer = GoogleCalendarSync(service, settings.calendar_id, settings.timezone)
+    syncer = GoogleCalendarSync(
+        service,
+        settings.calendar_id,
+        settings.timezone,
+        overwrite_manual_edits=overwrite_manual,
+    )
     stats = syncer.sync(result.events, dry_run=not push)
 
+    summary = f"新規{stats.created}件 / 更新{stats.updated}件 / 変更なし{stats.unchanged}件"
     if push:
-        click.echo(f"\n登録完了: 新規{stats.created}件 / 更新{stats.updated}件 / 変更なし{stats.unchanged}件")
+        click.echo(f"\n登録完了: {summary}")
     else:
+        click.echo(f"\n[ドライラン] {summary} (--push を付けると実際に登録します)")
+
+    if stats.skipped_manual:
         click.echo(
-            f"\n[ドライラン] 新規{stats.created}件 / 更新{stats.updated}件 / 変更なし{stats.unchanged}件"
-            " (--push を付けると実際に登録します)"
+            f"手動で編集されていたため、そのまま残した予定: {stats.skipped_manual}件"
+            " (抽出結果で戻したい場合は --overwrite-manual)"
         )
 
 

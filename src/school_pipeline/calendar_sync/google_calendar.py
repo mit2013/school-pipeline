@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import logging
 from dataclasses import dataclass
 from datetime import date, timedelta
@@ -9,6 +10,8 @@ from ..models import EventType, SchoolEvent
 logger = logging.getLogger(__name__)
 
 _EXT_PROPERTY_KEY = "school_pipeline_id"
+# 最後にパイプラインが書き込んだ内容の指紋。人が手で直したかどうかの判定に使う。
+_EXT_SIGNATURE_KEY = "school_pipeline_synced"
 
 # Googleカレンダーの colorId (1-11)。種別が一目でわかるよう色分けする。
 _COLOR_BY_TYPE = {
@@ -25,6 +28,8 @@ class SyncStats:
     created: int = 0
     updated: int = 0
     unchanged: int = 0
+    # 人が手で編集したため、上書きせず残した予定の件数。
+    skipped_manual: int = 0
 
 
 class GoogleCalendarSync:
@@ -34,10 +39,18 @@ class GoogleCalendarSync:
     再実行しても重複登録せず、内容が変わった予定だけ更新する。
     """
 
-    def __init__(self, service, calendar_id: str, timezone: str = "Asia/Tokyo") -> None:
+    def __init__(
+        self,
+        service,
+        calendar_id: str,
+        timezone: str = "Asia/Tokyo",
+        *,
+        overwrite_manual_edits: bool = False,
+    ) -> None:
         self._service = service
         self._calendar_id = calendar_id
         self._timezone = timezone
+        self._overwrite_manual_edits = overwrite_manual_edits
 
     def sync(self, events: list[SchoolEvent], *, dry_run: bool = True) -> SyncStats:
         existing_by_stable_id = self._load_existing(events)
@@ -50,6 +63,10 @@ class GoogleCalendarSync:
                 logger.info("[CREATE] %s %s", event.date, event.title)
                 if not dry_run:
                     self._service.events().insert(calendarId=self._calendar_id, body=body).execute()
+            elif self._was_edited_by_hand(existing):
+                # 家族が手で直した予定を、抽出結果で黙って戻さない。
+                stats.skipped_manual += 1
+                logger.info("[SKIP] %s %s (手動で編集されているため上書きしません)", event.date, event.title)
             elif _needs_update(existing, body, self._timezone):
                 stats.updated += 1
                 logger.info("[UPDATE] %s %s", event.date, event.title)
@@ -60,6 +77,21 @@ class GoogleCalendarSync:
             else:
                 stats.unchanged += 1
         return stats
+
+    def _was_edited_by_hand(self, existing: dict) -> bool:
+        """カレンダー上の予定が、前回パイプラインが書いた内容から変わっているか。
+
+        書き込み時に内容の指紋を extendedProperties に残しておき、次回それと
+        実際の内容を突き合わせる。ズレていれば人が触ったということ。
+        指紋を持たない予定(この仕組みの導入前に作られたもの)は、判断材料が
+        ないのでパイプラインの管理下とみなす。
+        """
+        if self._overwrite_manual_edits:
+            return False
+        stored = existing.get("extendedProperties", {}).get("private", {}).get(_EXT_SIGNATURE_KEY)
+        if not stored:
+            return False
+        return stored != _content_signature(existing, self._timezone)
 
     def _load_existing(self, events: list[SchoolEvent] | None = None) -> dict[str, dict]:
         by_id: dict[str, dict] = {}
@@ -119,31 +151,46 @@ def _to_calendar_body(event: SchoolEvent, timezone: str = "Asia/Tokyo") -> dict:
             "dateTime": f"{end_date.isoformat()}T{end_time.strftime('%H:%M')}:00",
             "timeZone": timezone,
         }
+    # 指紋は内容から計算するので、内容が固まった後に入れる。
+    body["extendedProperties"]["private"][_EXT_SIGNATURE_KEY] = _content_signature(body, timezone)
     return body
 
 
-def _needs_update(existing: dict, new_body: dict, timezone: str = "Asia/Tokyo") -> bool:
-    for key in ("summary", "description", "location", "colorId"):
-        if existing.get(key) != new_body.get(key):
-            return True
-    for key in ("start", "end"):
-        if not _same_endpoint(existing.get(key), new_body.get(key), timezone):
-            return True
-    return False
+def _content_signature(event: dict, timezone: str) -> str:
+    """パイプラインが管理する項目だけを取り出した内容の指紋。
 
-
-def _same_endpoint(existing: dict | None, new: dict | None, timezone: str) -> bool:
-    """start/end が同じ時点を指しているかを比べる。
-
-    Google APIは登録した dateTime をオフセット付き("...T10:00:00+09:00")で返す
-    のに対し、こちらが組み立てる body は timeZone 別指定のナイーブな文字列なので、
-    辞書をそのまま比較すると毎回「更新あり」と誤判定されてしまう。
+    Google APIは登録時と違う形(オフセット付きの dateTime など)で返してくるため、
+    正規化してから計算する。こうすることで、こちらが組み立てた body と、APIから
+    読み戻した予定とを同じ土俵で比較できる。
     """
-    if existing is None or new is None:
-        return existing == new
-    if "date" in existing or "date" in new:
-        return existing.get("date") == new.get("date")
-    return _to_instant(existing, timezone) == _to_instant(new, timezone)
+    parts = [
+        event.get("summary") or "",
+        event.get("description") or "",
+        event.get("location") or "",
+        event.get("colorId") or "",
+        _endpoint_key(event.get("start"), timezone),
+        _endpoint_key(event.get("end"), timezone),
+    ]
+    return hashlib.sha256("\x1f".join(parts).encode("utf-8")).hexdigest()[:16]
+
+
+def _endpoint_key(endpoint: dict | None, timezone: str) -> str:
+    if not endpoint:
+        return ""
+    if "date" in endpoint:
+        return "d:" + (endpoint.get("date") or "")
+    instant = _to_instant(endpoint, timezone)
+    return "t:" + (instant.isoformat() if instant else "")
+
+
+def _needs_update(existing: dict, new_body: dict, timezone: str = "Asia/Tokyo") -> bool:
+    """カレンダー上の予定を抽出結果に合わせて書き換える必要があるか。
+
+    「手で編集されたか」の判定(_was_edited_by_hand)と同じ指紋を使う。別々の
+    比較ロジックを持つと、片方だけが差分を認識してしまい、編集を保護したはずの
+    予定が更新されるといった食い違いが起きうるため。
+    """
+    return _content_signature(existing, timezone) != _content_signature(new_body, timezone)
 
 
 def _to_instant(endpoint: dict, timezone: str):
