@@ -75,11 +75,15 @@ class GoogleCalendarSync:
         stats = SyncStats()
         # 実際に照合できた既存予定のキー。どれとも結びつかなかったものが孤児になる。
         matched_keys: set[str] = set()
+        # 1件の既存予定を2件の抽出結果が取り合わないようにするための記録。
+        claimed: set[str] = set()
         for event in events:
             body = _to_calendar_body(event, self._timezone)
-            existing, matched_key = self._find_existing(existing_by_stable_id, event)
+            existing, matched_key = self._find_existing(existing_by_stable_id, event, claimed)
             if matched_key:
                 matched_keys.add(matched_key)
+            if existing is not None:
+                claimed.add(existing["id"])
             if existing is None:
                 stats.created += 1
                 logger.info("[CREATE] %s %s", event.date, event.title)
@@ -110,21 +114,25 @@ class GoogleCalendarSync:
         )
         return stats
 
-    def _find_existing(self, existing_by_stable_id: dict[str, dict], event: SchoolEvent):
+    def _find_existing(self, existing_by_stable_id: dict[str, dict], event: SchoolEvent, claimed: set):
         """カレンダー上の対応する予定を探す。(見つかった予定, 照合に使ったキー)。
 
         識別子の付け方を変えたときに、既存の登録が全部「別物」に見えてしまうと、
         削除して入れ直すことになり、手で編集された内容が失われる。そうならないよう、
         新しい識別子で見つからなければ旧形式の識別子でも探す。見つかれば更新扱いに
         なり、その際に新しい識別子が書き込まれるので、次回からは移行済みになる。
+
+        旧形式の識別子は日付までしか見ていないので、同じ日に締め切られる別々の課題
+        (B-3 と B-4 など)が同じ既存予定を指してしまう。先に取られていたら諦めて
+        新規作成に回す。そうしないと片方がもう片方を上書きして消えてしまう。
         """
         found = existing_by_stable_id.get(event.stable_id)
-        if found is not None:
+        if found is not None and found["id"] not in claimed:
             return found, event.stable_id
         legacy = event.legacy_stable_id
         if legacy != event.stable_id:
             found = existing_by_stable_id.get(legacy)
-            if found is not None:
+            if found is not None and found["id"] not in claimed:
                 logger.info("[MIGRATE] %s %s (識別子を新形式へ移行します)", event.date, event.title)
                 return found, legacy
         return None, None

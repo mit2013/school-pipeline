@@ -417,3 +417,23 @@ def test_unprotected_events_are_still_pruned():
     stats = syncer.sync([], dry_run=False, prune=True, keep_ids={"別の予定のID"})
 
     assert stats.deleted == 1
+
+
+def test_two_events_do_not_claim_the_same_legacy_entry():
+    """旧IDが同じ2件が、1つの既存予定を取り合って片方消えないこと。
+
+    旧IDは日付までしか見ていないため、同じ日に締め切られる B-3 と B-4 は
+    同じ旧IDになる。先に取られていたら新規作成に回す必要がある。
+    """
+    b3 = _event(date=date(2026, 9, 28), identity_key="B-3", subject="英語", title="週末課題 B-3 提出")
+    b4 = _event(date=date(2026, 9, 28), identity_key="B-4", subject="英語", title="週末課題 B-4 提出")
+    assert b3.legacy_stable_id == b4.legacy_stable_id  # 前提の確認
+
+    service = FakeCalendarService(existing_items=[_legacy_existing(b3)])
+    syncer = GoogleCalendarSync(service, calendar_id="primary")
+
+    stats = syncer.sync([b3, b4], dry_run=False, prune=True)
+
+    assert (stats.created, stats.updated, stats.deleted) == (1, 1, 0)
+    assert len(service.events().inserted) == 1
+    assert len(service.events().updated) == 1
