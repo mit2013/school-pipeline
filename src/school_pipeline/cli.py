@@ -89,6 +89,7 @@ def run(config_path: str, push: bool, force: bool, overwrite_manual: bool, prune
         exclusions=ExclusionRules.load(settings.exclusions_path),
         max_span_days=settings.max_span_days,
         my_class=settings.my_class,
+        my_class_aliases=settings.my_class_aliases,
     )
     cache.save(settings.cache_path)
     _report_usage(extractor.usage, settings)

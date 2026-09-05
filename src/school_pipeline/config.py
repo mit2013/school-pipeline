@@ -35,6 +35,9 @@ class Settings:
     max_span_days: int = 14
     # 自分(息子)のクラス。クラス別に内容の違う資料を取り違えないための確認に使う。
     my_class: str | None = None
+    # クラスの別名。コースが1クラスしかない場合など、配布物が別の呼び方で
+    # 対象を書いてくることがあるため。
+    my_class_aliases: list[str] = field(default_factory=list)
     cache_path: str = ".school_pipeline_cache.json"
     # API使用量と残高の目安を記録するファイル。
     usage_ledger_path: str = ".school_pipeline_usage.json"
@@ -61,6 +64,7 @@ def load_settings(path: str | Path) -> Settings:
         exclusions_path=data.get("exclusions_path", "exclusions.yaml"),
         max_span_days=int(data.get("max_span_days", 14)),
         my_class=data.get("my_class"),
+        my_class_aliases=list(data.get("my_class_aliases") or []),
         cache_path=data.get("cache_path", ".school_pipeline_cache.json"),
         usage_ledger_path=data.get("usage_ledger_path", ".school_pipeline_usage.json"),
         jpy_per_usd=float(data.get("jpy_per_usd", 155.0)),

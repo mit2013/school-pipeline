@@ -109,3 +109,17 @@ def test_audience_excludes_only_when_classes_are_enumerated():
     # 設定が無ければ何も判定しない
     assert not audience_excludes("1・2組", None)
     assert not audience_excludes(None, "5組")
+
+
+def test_class_aliases_are_recognised_as_our_own():
+    """1クラスしかないコースでは、コース名がそのままクラスの別名になる。"""
+    from school_pipeline.models import audience_excludes, audience_matches
+
+    aliases = ["特進コース", "特進"]
+    assert audience_matches("特進コース保護者", "5組", aliases)
+    assert audience_matches("特進 2年", "5組", aliases)
+    assert not audience_excludes("特進コース保護者", "5組", aliases)
+    # 別名に当てはまらず、クラス列挙に自分がいなければ従来どおり除外する
+    assert audience_excludes("1・2組", "5組", aliases)
+    # 別名を知らなければ判定できないので除外しない(勝手に捨てない)
+    assert not audience_excludes("特進コース保護者", "5組")

@@ -356,3 +356,37 @@ def test_january_belongs_to_the_previous_school_year():
 
     assert len(result.events) == 1
     assert result.events[0].confidence == 0.9
+
+
+def test_grade_wide_audiences_do_not_warn():
+    """学年全体向けの資料まで警告すると、肝心のクラス違いを読み飛ばしてしまう。"""
+    doc = _doc("保護者向けチラシ.pdf")
+    extractor = FakeExtractor(
+        {"保護者向けチラシ.pdf": [_event(audience="中学1〜3年生", identity_key="説明会")]}
+    )
+
+    result = run_pipeline(
+        [FakeSource([doc])], extractor, confidence_threshold=0.5, my_class="5組"
+    )
+
+    assert len(result.events) == 1
+    assert result.warnings == []
+
+
+def test_class_aliases_suppress_the_warning():
+    """1クラスしかないコース名は自分のクラスとして扱う。"""
+    doc = _doc("文化祭のお知らせ.pdf")
+    extractor = FakeExtractor(
+        {"文化祭のお知らせ.pdf": [_event(audience="特進コース保護者", identity_key="文化祭")]}
+    )
+
+    result = run_pipeline(
+        [FakeSource([doc])],
+        extractor,
+        confidence_threshold=0.5,
+        my_class="5組",
+        my_class_aliases=["特進コース"],
+    )
+
+    assert len(result.events) == 1
+    assert result.warnings == []

@@ -5,7 +5,7 @@ from dataclasses import dataclass, field
 from datetime import date
 from typing import Protocol
 
-from ..models import SchoolEvent, SourceRef, audience_excludes, normalize_identity
+from ..models import SchoolEvent, SourceRef, audience_excludes, audience_lists_my_class, audience_matches, normalize_identity
 from ..sources.base import Source
 from .cache import ExtractionCache
 from .dedup import EventConflict, dedup_events, find_possible_duplicates
@@ -50,6 +50,7 @@ def run_pipeline(
     exclusions: ExclusionRules | None = None,
     max_span_days: int = DEFAULT_MAX_SPAN_DAYS,
     my_class: str | None = None,
+    my_class_aliases: list | None = None,
 ) -> PipelineResult:
     # 抽出条件(モデル・プロンプト・ツール定義)の指紋。これが変わったキャッシュは使わない。
     fingerprint = getattr(extractor, "fingerprint", "")
@@ -79,9 +80,10 @@ def run_pipeline(
                 cache.put(source_key, content_hash, events, fingerprint)
             all_events.extend(events)
 
-    all_events, other_class = _split_off_other_classes(all_events, my_class)
+    aliases = my_class_aliases or []
+    all_events, other_class = _split_off_other_classes(all_events, my_class, aliases)
     _flag_events_outside_the_school_year(all_events)
-    warnings = _audience_warnings(all_events, my_class)
+    warnings = _audience_warnings(all_events, my_class, aliases)
     _flag_implausibly_long_events(all_events, max_span_days)
 
     deduped, conflicts = dedup_events(all_events)
@@ -158,7 +160,7 @@ def _school_year(value: date) -> int:
 
 
 def _split_off_other_classes(
-    events: list[SchoolEvent], my_class: str | None
+    events: list[SchoolEvent], my_class: str | None, aliases: list
 ) -> tuple[list[SchoolEvent], list[SchoolEvent]]:
     """対象が他クラスだと明記されている予定を取り除く。
 
@@ -171,20 +173,18 @@ def _split_off_other_classes(
     mine: list[SchoolEvent] = []
     others: list[SchoolEvent] = []
     for event in events:
-        (others if audience_excludes(event.audience, my_class) else mine).append(event)
+        (others if audience_excludes(event.audience, my_class, aliases) else mine).append(event)
     return mine, others
 
 
-def _audience_warnings(events: list[SchoolEvent], my_class: str | None) -> list[str]:
+def _audience_warnings(events: list[SchoolEvent], my_class: str | None, aliases: list) -> list[str]:
     """対象が明記されているが、自分のクラスが含まれるか判定できない資料を知らせる。
 
-    「B先生担当クラス」のようにクラス番号で書かれていない対象は機械的に
-    判定できない。勝手に捨てず、人が確認できるよう知らせるだけにする。
+    「B先生担当クラス」のようにクラス番号で書かれておらず、別名にも当てはまらない
+    対象は機械的に判定できない。勝手に捨てず、人が確認できるよう知らせるだけにする。
     """
     if not my_class:
         return []
-    target = normalize_identity(my_class)
-    digits = "".join(ch for ch in target if ch.isdigit())
 
     seen: set[tuple[str, str]] = set()
     warnings: list[str] = []
@@ -195,11 +195,26 @@ def _audience_warnings(events: list[SchoolEvent], my_class: str | None) -> list[
         if key in seen:
             continue
         seen.add(key)
-        audience = normalize_identity(event.audience)
-        if target in audience or (digits and digits in audience):
+        if audience_matches(event.audience, my_class, aliases):
+            continue
+        if audience_lists_my_class(event.audience, my_class):
+            continue
+        if not _is_class_specific(event.audience):
+            # 「中学1〜3年生」「2年生」のような学年・全体向けの資料。クラスを
+            # 絞っていないので警告する必要がない。毎回出すと警告が読み流される。
             continue
         warnings.append(
             f"「{event.source.label}」は「{event.audience}」向けと書かれています"
             f"({my_class} が対象か確認してください)"
         )
     return warnings
+
+
+def _is_class_specific(audience: str) -> bool:
+    """その対象の書き方が、クラス単位で相手を絞っているか。
+
+    絞っていない資料(学年全体・保護者全体)まで警告すると、毎回同じ警告が並んで
+    肝心のクラス違いを読み飛ばすことになる。
+    """
+    stated = normalize_identity(audience)
+    return any(word in stated for word in ("組", "クラス", "コース"))

@@ -6,6 +6,7 @@ import unicodedata
 from dataclasses import dataclass
 from datetime import date, time
 from enum import Enum
+from typing import Iterable
 
 
 class EventType(str, Enum):
@@ -118,26 +119,58 @@ def _digest(*parts: str) -> str:
     return hashlib.sha1("|".join(parts).encode("utf-8")).hexdigest()[:16]
 
 
-def audience_excludes(audience: str | None, my_class: str | None) -> bool:
+def audience_matches(audience: str | None, my_class: str | None, aliases: Iterable[str] = ()) -> bool:
+    """その対象の書き方が、自分のクラスを指していると分かるか。
+
+    クラスは番号以外の呼び方でも書かれる。コースが1クラスしかない場合、
+    コース名がそのままクラスの別名になる(設定の my_class_aliases で指定する)。
+    """
+    stated = normalize_identity(audience)
+    if not stated:
+        return False
+    for name in [my_class, *aliases]:
+        normalized = normalize_identity(name)
+        if normalized and normalized in stated:
+            return True
+    return False
+
+
+def audience_lists_my_class(audience: str | None, my_class: str | None) -> bool:
+    """対象がクラスの列挙で書かれていて、その中に自分のクラスがあるか。
+
+    「3, 4, 5, 12組」のような書き方から「5組が含まれる」と読み取るためのもの。
+    列挙でない対象(「B先生担当クラス」など)には False を返す。
+    """
+    if not audience or not my_class:
+        return False
+    stated = normalize_identity(audience)
+    if "組" not in stated:
+        return False
+    my_numbers = re.findall(r"\d+", normalize_identity(my_class))
+    return bool(my_numbers) and my_numbers[0] in set(re.findall(r"\d+", stated))
+
+
+def audience_excludes(audience: str | None, my_class: str | None, aliases: Iterable[str] = ()) -> bool:
     """その資料/予定の対象に、自分のクラスが含まれていないと言い切れるか。
 
     同じ連絡の中でクラスごとに違う日付が示されることがある(「3・4・5・A組は9月7日、
     1・2組は9月8日」など)。自分のクラス向けでないほうを取り込むと、そのまま
     間違った日程が登録されてしまう。
 
-    判断できるのは対象がクラスの列挙になっている場合だけである。「特進
-    コース」「B先生担当クラス」のようにクラス番号で書かれていない対象は、
-    含まれるかどうかを機械的に判定できないので、除外しない(判断を人に残す)。
+    判断できるのは対象がクラスの列挙になっている場合だけである。「B先生担当クラス」
+    のようにクラス番号で書かれておらず、別名にも当てはまらない対象は、含まれるか
+    どうかを機械的に判定できないので、除外しない(判断を人に残す)。
     """
     if not audience or not my_class:
         return False
-    stated = normalize_identity(audience)
-    mine = normalize_identity(my_class)
-    if mine and mine in stated:
+    if audience_matches(audience, my_class, aliases):
         return False
+    if audience_lists_my_class(audience, my_class):
+        return False
+    stated = normalize_identity(audience)
     if "組" not in stated:
         return False
-    my_numbers = re.findall(r"\d+", mine)
+    my_numbers = re.findall(r"\d+", normalize_identity(my_class))
     stated_numbers = set(re.findall(r"\d+", stated))
     if not my_numbers or not stated_numbers:
         return False
