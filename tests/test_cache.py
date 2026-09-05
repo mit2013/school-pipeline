@@ -81,3 +81,31 @@ def test_load_corrupt_file_returns_empty_cache(tmp_path):
     cache = ExtractionCache.load(cache_path)
 
     assert cache.get("pdf:foo.pdf", "anyhash") is None
+
+
+def test_cache_misses_when_the_extraction_fingerprint_changes():
+    """本文が同じでも、モデルやプロンプトが変われば抽出し直す必要がある。"""
+    cache = ExtractionCache()
+    cache.put("pdf:foo.pdf", "texthash", [_event()], "fingerprint-v1")
+
+    assert cache.get("pdf:foo.pdf", "texthash", "fingerprint-v1") is not None
+    assert cache.get("pdf:foo.pdf", "texthash", "fingerprint-v2") is None
+
+
+def test_legacy_entries_without_a_fingerprint_are_not_reused():
+    """指紋を持たない古いエントリは、どの条件で作られたか不明なので作り直す。"""
+    cache = ExtractionCache()
+    cache._entries["pdf:foo.pdf"] = {"hash": "texthash", "events": []}
+
+    assert cache.get("pdf:foo.pdf", "texthash", "fingerprint-v1") is None
+
+
+def test_fingerprint_is_persisted(tmp_path):
+    path = tmp_path / "cache.json"
+    cache = ExtractionCache()
+    cache.put("pdf:foo.pdf", "texthash", [_event()], "fingerprint-v1")
+    cache.save(path)
+
+    reloaded = ExtractionCache.load(path)
+    assert reloaded.get("pdf:foo.pdf", "texthash", "fingerprint-v1") is not None
+    assert reloaded.get("pdf:foo.pdf", "texthash", "other") is None

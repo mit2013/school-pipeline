@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 from datetime import date, datetime, time
@@ -27,7 +28,25 @@ SYSTEM_PROMPT = """あなたは私立中学校の保護者向けに、メール�
 
 
 class AnthropicLike(Protocol):
+    model: str
+
     def create_message(self, *, system: str, user: str, tool_schema: dict) -> dict: ...
+
+
+def extraction_fingerprint(model: str) -> str:
+    """抽出結果を左右する条件(モデル・プロンプト・ツール定義)の指紋。
+
+    キャッシュはこれを本文のハッシュと一緒に持つ。プロンプトを1行直しただけでも
+    指紋が変わってキャッシュが外れるため、改善が黙って無視されることがなくなる。
+    モデルだけでなくプロンプトとスキーマも含めるのが要点で、実際に頻繁に変わるのは
+    後者2つのほうである。
+    """
+    payload = json.dumps(
+        {"model": model, "system_prompt": SYSTEM_PROMPT, "tool_schema": EVENT_TOOL_SCHEMA},
+        ensure_ascii=False,
+        sort_keys=True,
+    )
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()[:16]
 
 
 class LLMExtractionError(RuntimeError):
@@ -41,6 +60,10 @@ class AnthropicExtractor:
         self._client = client
         # この実行で実際にAPIを呼んだ分の使用量(キャッシュヒットは含まれない)。
         self.usage = UsageTotals()
+
+    @property
+    def fingerprint(self) -> str:
+        return extraction_fingerprint(getattr(self._client, "model", ""))
 
     def extract(self, text: str, *, reference_date: date, source: SourceRef | None = None) -> list[SchoolEvent]:
         if not text.strip():
@@ -79,11 +102,11 @@ class AnthropicMessagesClient:
         import anthropic
 
         self._client = anthropic.Anthropic(api_key=api_key)
-        self._model = model
+        self.model = model
 
     def create_message(self, *, system: str, user: str, tool_schema: dict) -> dict:
         response = self._client.messages.create(
-            model=self._model,
+            model=self.model,
             max_tokens=8192,
             system=system,
             messages=[{"role": "user", "content": user}],

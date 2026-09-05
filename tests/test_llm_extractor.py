@@ -288,3 +288,36 @@ def test_extract_raises_when_tool_call_missing():
 
     with pytest.raises(LLMExtractionError):
         extractor.extract("何か本文", reference_date=date(2026, 9, 1))
+
+
+def test_fingerprint_changes_with_the_model():
+    from school_pipeline.extraction.llm_extractor import extraction_fingerprint
+
+    assert extraction_fingerprint("claude-sonnet-5") != extraction_fingerprint("claude-opus-5")
+
+
+def test_fingerprint_changes_with_the_system_prompt(monkeypatch):
+    """プロンプトを直したらキャッシュが外れることを保証する(これが本題)。"""
+    from school_pipeline.extraction import llm_extractor
+
+    before = llm_extractor.extraction_fingerprint("claude-sonnet-5")
+    monkeypatch.setattr(llm_extractor, "SYSTEM_PROMPT", llm_extractor.SYSTEM_PROMPT + "\n- 追加ルール")
+    after = llm_extractor.extraction_fingerprint("claude-sonnet-5")
+
+    assert before != after
+
+
+def test_fingerprint_changes_with_the_tool_schema(monkeypatch):
+    from school_pipeline.extraction import llm_extractor
+
+    before = llm_extractor.extraction_fingerprint("claude-sonnet-5")
+    monkeypatch.setattr(
+        llm_extractor, "EVENT_TOOL_SCHEMA", {**llm_extractor.EVENT_TOOL_SCHEMA, "description": "changed"}
+    )
+    assert before != llm_extractor.extraction_fingerprint("claude-sonnet-5")
+
+
+def test_fingerprint_is_stable_across_calls():
+    from school_pipeline.extraction.llm_extractor import extraction_fingerprint
+
+    assert extraction_fingerprint("claude-sonnet-5") == extraction_fingerprint("claude-sonnet-5")

@@ -34,6 +34,9 @@ def run_pipeline(
     cache: ExtractionCache | None = None,
     force: bool = False,
 ) -> PipelineResult:
+    # 抽出条件(モデル・プロンプト・ツール定義)の指紋。これが変わったキャッシュは使わない。
+    fingerprint = getattr(extractor, "fingerprint", "")
+
     all_events: list[SchoolEvent] = []
     for source in sources:
         for doc in source.fetch():
@@ -41,7 +44,7 @@ def run_pipeline(
             content_hash = ExtractionCache.content_hash(doc.text)
 
             if cache is not None and not force:
-                cached_events = cache.get(source_key, content_hash)
+                cached_events = cache.get(source_key, content_hash, fingerprint)
                 if cached_events is not None:
                     logger.info("Using cached extraction for %s (unchanged since last run)", doc.source.label)
                     for ev in cached_events:
@@ -56,7 +59,7 @@ def run_pipeline(
                 continue
 
             if cache is not None:
-                cache.put(source_key, content_hash, events)
+                cache.put(source_key, content_hash, events, fingerprint)
             all_events.extend(events)
 
     deduped = dedup_events(all_events)

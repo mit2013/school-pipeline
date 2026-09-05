@@ -41,15 +41,22 @@ class ExtractionCache:
     def content_hash(text: str) -> str:
         return hashlib.sha256(text.encode("utf-8")).hexdigest()
 
-    def get(self, source_key: str, content_hash: str) -> list[SchoolEvent] | None:
+    def get(self, source_key: str, content_hash: str, fingerprint: str = "") -> list[SchoolEvent] | None:
         entry = self._entries.get(source_key)
         if entry is None or entry.get("hash") != content_hash:
             return None
+        # 本文が同じでも、モデルやプロンプトが変わっていれば抽出結果は変わりうる。
+        # 指紋を持たない古いエントリも、どの条件で作られたか分からないので作り直す。
+        if entry.get("fingerprint") != fingerprint:
+            return None
         return [_deserialize_event(raw) for raw in entry["events"]]
 
-    def put(self, source_key: str, content_hash: str, events: list[SchoolEvent]) -> None:
+    def put(
+        self, source_key: str, content_hash: str, events: list[SchoolEvent], fingerprint: str = ""
+    ) -> None:
         self._entries[source_key] = {
             "hash": content_hash,
+            "fingerprint": fingerprint,
             "events": [_serialize_event(ev) for ev in events],
         }
 
