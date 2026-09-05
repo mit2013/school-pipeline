@@ -41,3 +41,9 @@ confidence_threshold: 0.5
 
 # 内容が変わっていないファイルの再抽出(=再課金)を防ぐキャッシュの保存先
 cache_path: .school_pipeline_cache.json
+
+# API使用量と残高の目安を記録するファイル
+usage_ledger_path: .school_pipeline_usage.json
+
+# 費用を円換算して表示するときのレート
+jpy_per_usd: 155

@@ -12,6 +12,7 @@ from .config import load_settings
 from .extraction.llm_extractor import AnthropicExtractor, AnthropicMessagesClient
 from .pipeline.cache import ExtractionCache
 from .pipeline.runner import PipelineResult, run_pipeline
+from .pipeline.usage import CreditLedger, UsageTotals, format_money
 from .sources.gmail_source import GmailAccountConfig, GmailSource
 from .sources.image_source import ImageSource
 from .sources.manual_source import ManualTextSource
@@ -72,6 +73,7 @@ def run(config_path: str, push: bool, force: bool) -> None:
         force=force,
     )
     cache.save(settings.cache_path)
+    _report_usage(extractor.usage, settings)
     _print_report(result)
 
     if not result.events:
@@ -171,3 +173,87 @@ def _print_report(result: PipelineResult) -> None:
 
 if __name__ == "__main__":
     main()
+
+
+def _report_usage(usage: UsageTotals, settings) -> None:
+    """この実行でかかったAPI費用と、残高の目安を表示する。"""
+    if usage.calls == 0:
+        click.echo("\nAPI呼び出し: 0回(すべてキャッシュから取得したため課金はありません)")
+        return
+
+    cost = usage.cost_usd(settings.anthropic_model)
+    click.echo(
+        f"\nAPI呼び出し: {usage.calls}回 "
+        f"(入力{usage.input_tokens:,} / 出力{usage.output_tokens:,} トークン)"
+    )
+    if cost is None:
+        click.echo(f"今回の費用: 不明({settings.anthropic_model} の単価が未登録です)")
+        return
+
+    click.echo(f"今回の費用: {format_money(cost, settings.jpy_per_usd)}")
+
+    ledger = CreditLedger.load(settings.usage_ledger_path)
+    ledger.record(cost, usage, settings.anthropic_model)
+    ledger.save(settings.usage_ledger_path)
+
+    remaining = ledger.estimated_remaining_usd
+    if remaining is None:
+        click.echo(
+            "残高の目安: 未設定 "
+            "(`school-pipeline balance --set <Consoleの残高>` で基準を登録してください)"
+        )
+    else:
+        click.echo(
+            f"残高の目安: {format_money(remaining, settings.jpy_per_usd)} "
+            f"※{ledger.anchor_date}に${ledger.anchor_usd:.2f}で同期"
+        )
+
+
+@main.command()
+@click.option("--config", "config_path", default="config.yaml", show_default=True)
+@click.option(
+    "--set",
+    "set_balance",
+    type=float,
+    default=None,
+    help="Consoleで確認した残高(USD)で基準を貼り直す",
+)
+def balance(config_path: str, set_balance: float | None) -> None:
+    """APIクレジット残高の目安を表示する(--set で実際の残高に同期)。
+
+    Anthropicは残高を返すAPIを公開していないため、正確な残高は Console
+    (https://platform.claude.com/settings/billing) でしか確認できない。
+    ここでは最後に同期した残高からの支出を差し引いた目安を表示する。
+    """
+    settings = load_settings(config_path)
+    ledger = CreditLedger.load(settings.usage_ledger_path)
+
+    if set_balance is not None:
+        ledger.set_anchor(set_balance)
+        ledger.save(settings.usage_ledger_path)
+        click.echo(
+            f"残高を {format_money(set_balance, settings.jpy_per_usd)} に同期しました"
+            f"({ledger.anchor_date}時点)。"
+        )
+        return
+
+    remaining = ledger.estimated_remaining_usd
+    if remaining is None:
+        click.echo("残高の基準が未設定です。")
+        click.echo("  https://platform.claude.com/settings/billing で残高を確認し、")
+        click.echo("  school-pipeline balance --set 3.49 のように登録してください。")
+        return
+
+    click.echo(f"残高の目安: {format_money(remaining, settings.jpy_per_usd)}")
+    click.echo(
+        f"  基準: {ledger.anchor_date} 時点で ${ledger.anchor_usd:.2f}"
+        f" / それ以降の使用: {format_money(ledger.spent_since_anchor_usd, settings.jpy_per_usd)}"
+    )
+    if ledger.history:
+        click.echo("  直近の実行:")
+        for h in ledger.history[-5:]:
+            click.echo(
+                f"    {h['date']}  {h['calls']}回  "
+                f"${h['cost_usd']:.4f}  ({h['model']})"
+            )
+    click.echo("\n※あくまで目安です。ズレてきたら Console の値で --set し直してください。")

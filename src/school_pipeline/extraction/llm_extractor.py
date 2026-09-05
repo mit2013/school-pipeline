@@ -6,6 +6,7 @@ from datetime import date, datetime, time
 from typing import Protocol
 
 from ..models import EventType, SchoolEvent, SourceRef
+from ..pipeline.usage import UsageTotals
 from .schema import EVENT_TOOL_SCHEMA
 
 logger = logging.getLogger(__name__)
@@ -38,6 +39,8 @@ class AnthropicExtractor:
 
     def __init__(self, client: AnthropicLike) -> None:
         self._client = client
+        # この実行で実際にAPIを呼んだ分の使用量(キャッシュヒットは含まれない)。
+        self.usage = UsageTotals()
 
     def extract(self, text: str, *, reference_date: date, source: SourceRef | None = None) -> list[SchoolEvent]:
         if not text.strip():
@@ -49,6 +52,8 @@ class AnthropicExtractor:
             f"---本文---\n{text.strip()}\n---本文ここまで---"
         )
         response = self._client.create_message(system=SYSTEM_PROMPT, user=user_prompt, tool_schema=EVENT_TOOL_SCHEMA)
+        # 応答の解析に失敗しても課金は発生しているので、先に使用量を記録する。
+        self.usage.add_response(response)
         raw_events = _parse_tool_response(response)
 
         events: list[SchoolEvent] = []

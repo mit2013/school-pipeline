@@ -13,3 +13,9 @@ config.yaml
 secrets/
 inbox/
 .school_pipeline_cache.json
+
+# API使用量・残高の記録
+.school_pipeline_usage.json
+
+# macOS が自動生成するフォルダ表示設定ファイル
+.DS_Store

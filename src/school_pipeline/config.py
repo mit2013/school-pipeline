@@ -30,6 +30,10 @@ class Settings:
     timezone: str = "Asia/Tokyo"
     confidence_threshold: float = 0.5
     cache_path: str = ".school_pipeline_cache.json"
+    # API使用量と残高の目安を記録するファイル。
+    usage_ledger_path: str = ".school_pipeline_usage.json"
+    # 費用を円換算して表示するときのレート。
+    jpy_per_usd: float = 155.0
 
 
 def load_settings(path: str | Path) -> Settings:
@@ -49,4 +53,6 @@ def load_settings(path: str | Path) -> Settings:
         timezone=data.get("timezone", "Asia/Tokyo"),
         confidence_threshold=float(data.get("confidence_threshold", 0.5)),
         cache_path=data.get("cache_path", ".school_pipeline_cache.json"),
+        usage_ledger_path=data.get("usage_ledger_path", ".school_pipeline_usage.json"),
+        jpy_per_usd=float(data.get("jpy_per_usd", 155.0)),
     )
