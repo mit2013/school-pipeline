@@ -31,6 +31,9 @@ manual_text_directory: inbox/manual
 # Googleカレンダー
 google_credentials_path: secrets/calendar_credentials.json
 google_calendar_token_path: secrets/calendar_token.json
+# 時刻指定のある予定を登録するときのタイムゾーン(IANA名)
+timezone: Asia/Tokyo
+
 calendar_id: primary   # 専用カレンダーを作ってそのIDを指定することを推奨
 
 # この確信度未満の予定はカレンダーに登録せず、一覧表示のみ行う (0.0〜1.0)

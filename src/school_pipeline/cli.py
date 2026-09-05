@@ -78,7 +78,7 @@ def run(config_path: str, push: bool, force: bool) -> None:
         return
 
     service = _build_calendar_service(settings)
-    syncer = GoogleCalendarSync(service, settings.calendar_id)
+    syncer = GoogleCalendarSync(service, settings.calendar_id, settings.timezone)
     stats = syncer.sync(result.events, dry_run=not push)
 
     if push:

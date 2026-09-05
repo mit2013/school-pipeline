@@ -1,4 +1,4 @@
-from datetime import date
+from datetime import date, time
 
 from school_pipeline.calendar_sync.google_calendar import GoogleCalendarSync
 from school_pipeline.models import EventType, SchoolEvent
@@ -17,8 +17,10 @@ class FakeEventsResource:
         self._existing_items = existing_items
         self.inserted: list[dict] = []
         self.updated: list[tuple[str, dict]] = []
+        self.list_kwargs: list[dict] = []
 
     def list(self, **kwargs):
+        self.list_kwargs.append(kwargs)
         return _Execuable({"items": self._existing_items})
 
     def insert(self, calendarId, body):
@@ -116,3 +118,59 @@ def test_sync_updates_when_description_changed():
     updated_event_id, updated_body = service.events().updated[0]
     assert updated_event_id == "existing-1"
     assert updated_body["description"] == "旧: 教科書p1-30"
+
+
+def _timed_event() -> SchoolEvent:
+    return _event(
+        type=EventType.EVENT,
+        title="アントレプレナーシップ教育プログラム",
+        date=date(2026, 10, 11),
+        subject=None,
+        start_time=time(10, 0),
+        end_time=time(17, 0),
+        all_day=False,
+    )
+
+
+def test_timed_event_body_carries_timezone():
+    """timeZone が無いと Google API が 400 Missing time zone definition を返す。"""
+    service = FakeCalendarService(existing_items=[])
+    syncer = GoogleCalendarSync(service, calendar_id="primary", timezone="Asia/Tokyo")
+
+    syncer.sync([_timed_event()], dry_run=False)
+
+    body = service.events().inserted[0]
+    assert body["start"] == {"dateTime": "2026-10-11T10:00:00", "timeZone": "Asia/Tokyo"}
+    assert body["end"] == {"dateTime": "2026-10-11T17:00:00", "timeZone": "Asia/Tokyo"}
+
+
+def test_timed_event_is_unchanged_on_rerun():
+    """APIはオフセット付きで返すので、素朴な辞書比較だと毎回「更新」になってしまう。"""
+    event = _timed_event()
+    existing = {
+        "id": "existing-id",
+        "summary": "[学校行事] アントレプレナーシップ教育プログラム",
+        "description": event.description,
+        "colorId": "9",
+        "start": {"dateTime": "2026-10-11T10:00:00+09:00", "timeZone": "Asia/Tokyo"},
+        "end": {"dateTime": "2026-10-11T17:00:00+09:00", "timeZone": "Asia/Tokyo"},
+        "extendedProperties": {"private": {"school_pipeline_id": event.stable_id}},
+    }
+    service = FakeCalendarService(existing_items=[existing])
+    syncer = GoogleCalendarSync(service, calendar_id="primary", timezone="Asia/Tokyo")
+
+    stats = syncer.sync([event], dry_run=False)
+
+    assert (stats.created, stats.updated, stats.unchanged) == (0, 0, 1)
+    assert service.events().updated == []
+
+
+def test_existing_lookup_reaches_back_to_oldest_event():
+    """過去の予定を含めて同期するとき、既存検索の窓が狭いと毎回重複登録される。"""
+    service = FakeCalendarService(existing_items=[])
+    syncer = GoogleCalendarSync(service, calendar_id="primary")
+
+    syncer.sync([_event(date=date(2026, 4, 20)), _event(date=date(2026, 11, 24))], dry_run=True)
+
+    time_min = service.events().list_kwargs[0]["timeMin"]
+    assert time_min < "2026-04-20", f"最古の予定より前まで遡っていない: {time_min}"
