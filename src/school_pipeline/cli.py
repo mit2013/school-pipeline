@@ -77,7 +77,10 @@ def run(config_path: str, push: bool, force: bool, overwrite_manual: bool, prune
     if not api_key:
         click.echo(f"環境変数 {settings.anthropic_api_key_env} が設定されていません。", err=True)
         sys.exit(1)
-    extractor = AnthropicExtractor(AnthropicMessagesClient(api_key=api_key, model=settings.anthropic_model))
+    extractor = AnthropicExtractor(
+        AnthropicMessagesClient(api_key=api_key, model=settings.anthropic_model),
+        notes=settings.extraction_notes,
+    )
 
     cache = ExtractionCache.load(settings.cache_path)
     result = run_pipeline(

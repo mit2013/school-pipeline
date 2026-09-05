@@ -38,6 +38,8 @@ class Settings:
     # クラスの別名。コースが1クラスしかない場合など、配布物が別の呼び方で
     # 対象を書いてくることがあるため。
     my_class_aliases: list[str] = field(default_factory=list)
+    # 資料には書かれていないが抽出に必要な前提(時間割など)。プロンプトに追記される。
+    extraction_notes: list[str] = field(default_factory=list)
     cache_path: str = ".school_pipeline_cache.json"
     # API使用量と残高の目安を記録するファイル。
     usage_ledger_path: str = ".school_pipeline_usage.json"
@@ -65,6 +67,7 @@ def load_settings(path: str | Path) -> Settings:
         max_span_days=int(data.get("max_span_days", 14)),
         my_class=data.get("my_class"),
         my_class_aliases=list(data.get("my_class_aliases") or []),
+        extraction_notes=list(data.get("extraction_notes") or []),
         cache_path=data.get("cache_path", ".school_pipeline_cache.json"),
         usage_ledger_path=data.get("usage_ledger_path", ".school_pipeline_usage.json"),
         jpy_per_usd=float(data.get("jpy_per_usd", 155.0)),

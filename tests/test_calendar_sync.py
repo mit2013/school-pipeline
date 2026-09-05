@@ -159,7 +159,12 @@ def test_timed_event_is_unchanged_on_rerun():
         "colorId": "9",
         "start": {"dateTime": "2026-10-11T10:00:00+09:00", "timeZone": "Asia/Tokyo"},
         "end": {"dateTime": "2026-10-11T17:00:00+09:00", "timeZone": "Asia/Tokyo"},
-        "extendedProperties": {"private": {"school_pipeline_id": event.stable_id}},
+        "extendedProperties": {
+            "private": {
+                "school_pipeline_id": event.stable_id,
+                "school_pipeline_datekey": event.legacy_stable_id,
+            }
+        },
     }
     service = FakeCalendarService(existing_items=[existing])
     syncer = GoogleCalendarSync(service, calendar_id="primary", timezone="Asia/Tokyo")
@@ -437,3 +442,39 @@ def test_two_events_do_not_claim_the_same_legacy_entry():
     assert (stats.created, stats.updated, stats.deleted) == (1, 1, 0)
     assert len(service.events().inserted) == 1
     assert len(service.events().updated) == 1
+
+
+def test_identity_key_drift_updates_instead_of_recreating():
+    """LLMがキーの文言を変えても、同じ予定として引き継ぐこと。
+
+    identity_key は毎回書き起こされるので「英単語テスト2周目」と
+    「英単語テスト火曜チャレンジ2周目」のように揺れる。揺れるたびに
+    別物と判定されると、同じ日に作り直しと削除が発生する。
+    """
+    before = _event(identity_key="英単語テスト2周目", subject="英語", date=date(2026, 9, 29))
+    after = _event(identity_key="英単語テスト火曜チャレンジ2周目", subject="英語", date=date(2026, 9, 29))
+    assert before.stable_id != after.stable_id  # 前提の確認
+
+    service = FakeCalendarService(existing_items=[_synced_existing(before)])
+    syncer = GoogleCalendarSync(service, calendar_id="primary")
+
+    stats = syncer.sync([after], dry_run=False, prune=True)
+
+    assert (stats.created, stats.updated, stats.deleted) == (0, 1, 0)
+    assert stats.orphans == []
+    body = service.events().updated[0][1]
+    assert body["extendedProperties"]["private"]["school_pipeline_id"] == after.stable_id
+
+
+def test_drift_fallback_does_not_merge_different_events_on_one_day():
+    """同じ日の別々の課題を、キーが揺れた同一予定と取り違えないこと。"""
+    b3 = _event(date=date(2026, 9, 28), identity_key="B-3", subject="英語", title="B-3")
+    b4 = _event(date=date(2026, 9, 28), identity_key="B-4", subject="英語", title="B-4")
+    service = FakeCalendarService(existing_items=[_synced_existing(b3), _synced_existing(b4)])
+    service.events()._existing_items[1]["id"] = "second-id"
+    syncer = GoogleCalendarSync(service, calendar_id="primary")
+
+    stats = syncer.sync([b3, b4], dry_run=False, prune=True)
+
+    assert (stats.created, stats.deleted) == (0, 0)
+    assert stats.orphans == []

@@ -39,6 +39,10 @@ SYSTEM_PROMPT = """あなたは私立中学校の保護者向けに、メール�
 - identity_key には、日付が変わっても同じ予定だと分かる番号や固有名(「B-1」など)を入れてください。
   同じ課題が別の資料では違う呼び方(「週末課題B-1」「長文B-1」)で書かれるので、呼称ではなく
   番号・記号を使うのが重要です。
+- 「9月7日の週」のように週単位で指定された予定は、その週の起点の日付をそのまま実施日に
+  しないでください。実際の実施日はその週の特定の曜日です。曜日が分かる手がかり(後述の
+  補足情報など)があればその曜日の日付に直し、分からなければ週の起点の日付を使ったうえで
+  confidence を 0.5 以下にしてください。
 - audience には、その資料が誰向けかを本文から読み取って入れてください。クラス別・担当者別に
   内容の違う資料が配られることがあり、それらを取り違えないために使います。
 - 1つの連絡の中でクラスごとに違う日程が示されている場合(「3・4・5・A組は9月7日、1・2組は
@@ -54,7 +58,20 @@ class AnthropicLike(Protocol):
     def create_message(self, *, system: str, user: str, tool_schema: dict) -> dict: ...
 
 
-def extraction_fingerprint(model: str) -> str:
+def build_system_prompt(notes: list | None = None) -> str:
+    """設定に書かれた補足情報を、システムプロンプトの末尾に足す。
+
+    時間割のように資料そのものには書かれていない前提(「現代文の小テストは金曜に実施」
+    など)は、本文からは読み取れない。ここで渡さないと、「○日の週」といった書き方を
+    実施日に変換できない。学校固有の情報なので、リポジトリではなく設定ファイルに置く。
+    """
+    if not notes:
+        return SYSTEM_PROMPT
+    lines = "\n".join(f"- {note}" for note in notes)
+    return f"{SYSTEM_PROMPT}\n補足情報(この生徒についての前提。本文より優先して使ってよい):\n{lines}\n"
+
+
+def extraction_fingerprint(model: str, notes: list | None = None) -> str:
     """抽出結果を左右する条件(モデル・プロンプト・ツール定義)の指紋。
 
     キャッシュはこれを本文のハッシュと一緒に持つ。プロンプトを1行直しただけでも
@@ -63,7 +80,11 @@ def extraction_fingerprint(model: str) -> str:
     後者2つのほうである。
     """
     payload = json.dumps(
-        {"model": model, "system_prompt": SYSTEM_PROMPT, "tool_schema": EVENT_TOOL_SCHEMA},
+        {
+            "model": model,
+            "system_prompt": build_system_prompt(notes),
+            "tool_schema": EVENT_TOOL_SCHEMA,
+        },
         ensure_ascii=False,
         sort_keys=True,
     )
@@ -77,14 +98,16 @@ class LLMExtractionError(RuntimeError):
 class AnthropicExtractor:
     """Anthropic Claude を使った構造化イベント抽出器。"""
 
-    def __init__(self, client: AnthropicLike) -> None:
+    def __init__(self, client: AnthropicLike, notes: list | None = None) -> None:
         self._client = client
+        self._notes = list(notes or [])
+        self._system_prompt = build_system_prompt(self._notes)
         # この実行で実際にAPIを呼んだ分の使用量(キャッシュヒットは含まれない)。
         self.usage = UsageTotals()
 
     @property
     def fingerprint(self) -> str:
-        return extraction_fingerprint(getattr(self._client, "model", ""))
+        return extraction_fingerprint(getattr(self._client, "model", ""), self._notes)
 
     def extract(self, text: str, *, reference_date: date, source: SourceRef | None = None) -> list[SchoolEvent]:
         if not text.strip():
@@ -95,7 +118,9 @@ class AnthropicExtractor:
             f"出典: {context_label}\n\n"
             f"---本文---\n{text.strip()}\n---本文ここまで---"
         )
-        response = self._client.create_message(system=SYSTEM_PROMPT, user=user_prompt, tool_schema=EVENT_TOOL_SCHEMA)
+        response = self._client.create_message(
+            system=self._system_prompt, user=user_prompt, tool_schema=EVENT_TOOL_SCHEMA
+        )
         # 応答の解析に失敗しても課金は発生しているので、先に使用量を記録する。
         self.usage.add_response(response)
         audience, raw_events = _parse_tool_response(response)

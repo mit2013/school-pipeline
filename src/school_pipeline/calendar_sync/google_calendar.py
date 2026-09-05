@@ -13,6 +13,9 @@ logger = logging.getLogger(__name__)
 _EXT_PROPERTY_KEY = "school_pipeline_id"
 # 最後にパイプラインが書き込んだ内容の指紋。人が手で直したかどうかの判定に使う。
 _EXT_SIGNATURE_KEY = "school_pipeline_synced"
+# 種別・科目・日付から作る補助キー。identity_key の文言が揺れても同じ予定を
+# 見つけられるようにするための保険。
+_EXT_DATEKEY_KEY = "school_pipeline_datekey"
 
 # Googleカレンダーの colorId (1-11)。種別が一目でわかるよう色分けする。
 _COLOR_BY_TYPE = {
@@ -75,11 +78,14 @@ class GoogleCalendarSync:
         stats = SyncStats()
         # 実際に照合できた既存予定のキー。どれとも結びつかなかったものが孤児になる。
         matched_keys: set[str] = set()
+        by_datekey = self._by_datekey(existing_by_stable_id)
         # 1件の既存予定を2件の抽出結果が取り合わないようにするための記録。
         claimed: set[str] = set()
         for event in events:
             body = _to_calendar_body(event, self._timezone)
-            existing, matched_key = self._find_existing(existing_by_stable_id, event, claimed)
+            existing, matched_key = self._find_existing(
+                existing_by_stable_id, by_datekey, event, claimed, matched_keys
+            )
             if matched_key:
                 matched_keys.add(matched_key)
             if existing is not None:
@@ -93,9 +99,13 @@ class GoogleCalendarSync:
                 # 家族が手で直した予定を、抽出結果で黙って戻さない。
                 stats.skipped_manual += 1
                 logger.info("[SKIP] %s %s (手動で編集されているため上書きしません)", event.date, event.title)
-            elif matched_key != event.stable_id or _needs_update(existing, body, self._timezone):
-                # 旧形式の識別子で見つけた場合は内容が同じでも書き戻す。そうしないと
-                # 新しい識別子が保存されず、いつまでも移行が終わらない。
+            elif (
+                matched_key != event.stable_id
+                or _private_property(existing, _EXT_DATEKEY_KEY) != event.legacy_stable_id
+                or _needs_update(existing, body, self._timezone)
+            ):
+                # 識別子や補助キーが未保存/古い場合は内容が同じでも書き戻す。
+                # そうしないと保存されないまま、毎回同じ移行処理を繰り返す。
                 stats.updated += 1
                 logger.info("[UPDATE] %s %s", event.date, event.title)
                 if not dry_run:
@@ -114,7 +124,14 @@ class GoogleCalendarSync:
         )
         return stats
 
-    def _find_existing(self, existing_by_stable_id: dict[str, dict], event: SchoolEvent, claimed: set):
+    def _find_existing(
+        self,
+        existing_by_stable_id: dict[str, dict],
+        by_datekey: dict[str, dict],
+        event: SchoolEvent,
+        claimed: set,
+        claimed_keys: set,
+    ):
         """カレンダー上の対応する予定を探す。(見つかった予定, 照合に使ったキー)。
 
         識別子の付け方を変えたときに、既存の登録が全部「別物」に見えてしまうと、
@@ -129,12 +146,22 @@ class GoogleCalendarSync:
         found = existing_by_stable_id.get(event.stable_id)
         if found is not None and found["id"] not in claimed:
             return found, event.stable_id
+
         legacy = event.legacy_stable_id
         if legacy != event.stable_id:
             found = existing_by_stable_id.get(legacy)
             if found is not None and found["id"] not in claimed:
                 logger.info("[MIGRATE] %s %s (識別子を新形式へ移行します)", event.date, event.title)
                 return found, legacy
+
+        # identity_key の文言が揺れた場合の保険。同じ種別・科目・日付の予定が
+        # 残っていれば、それは同じ予定なので作り直さずに引き継ぐ。
+        found = by_datekey.get(legacy)
+        if found is not None and found["id"] not in claimed:
+            matched_key = _private_property(found, _EXT_PROPERTY_KEY)
+            if matched_key and matched_key not in claimed_keys:
+                logger.info("[REKEY] %s %s (識別子が変わったため引き継ぎます)", event.date, event.title)
+                return found, matched_key
         return None, None
 
     def _collect_orphans(
@@ -185,6 +212,20 @@ class GoogleCalendarSync:
             return False
         return stored != _content_signature(existing, self._timezone)
 
+    def _by_datekey(self, existing_by_stable_id: dict[str, dict]) -> dict[str, dict]:
+        """種別・科目・日付から作った補助キーで既存の予定を引けるようにする。
+
+        identity_key は毎回LLMが書き起こすので、同じ予定でも文言が揺れる
+        (「英単語テスト2周目」と「英単語テスト火曜チャレンジ2周目」など)。
+        揺れるたびに別の予定と判定されると、同じ日に作り直しと削除が発生する。
+        """
+        by_key: dict[str, dict] = {}
+        for item in existing_by_stable_id.values():
+            datekey = _private_property(item, _EXT_DATEKEY_KEY)
+            if datekey:
+                by_key[datekey] = item
+        return by_key
+
     def _load_existing(self, events: list[SchoolEvent] | None = None) -> dict[str, dict]:
         by_id: dict[str, dict] = {}
         page_token = None
@@ -205,7 +246,7 @@ class GoogleCalendarSync:
                 kwargs["pageToken"] = page_token
             resp = self._service.events().list(**kwargs).execute()
             for item in resp.get("items", []):
-                stable_id = item.get("extendedProperties", {}).get("private", {}).get(_EXT_PROPERTY_KEY)
+                stable_id = _private_property(item, _EXT_PROPERTY_KEY)
                 if stable_id:
                     by_id[stable_id] = item
             page_token = resp.get("nextPageToken")
@@ -222,7 +263,12 @@ def _to_calendar_body(event: SchoolEvent, timezone: str = "Asia/Tokyo") -> dict:
         "summary": summary,
         "description": event.description,
         "colorId": _COLOR_BY_TYPE.get(event.type),
-        "extendedProperties": {"private": {_EXT_PROPERTY_KEY: event.stable_id}},
+        "extendedProperties": {
+            "private": {
+                _EXT_PROPERTY_KEY: event.stable_id,
+                _EXT_DATEKEY_KEY: event.legacy_stable_id,
+            }
+        },
     }
     if event.location:
         body["location"] = event.location
@@ -246,6 +292,10 @@ def _to_calendar_body(event: SchoolEvent, timezone: str = "Asia/Tokyo") -> dict:
     # 指紋は内容から計算するので、内容が固まった後に入れる。
     body["extendedProperties"]["private"][_EXT_SIGNATURE_KEY] = _content_signature(body, timezone)
     return body
+
+
+def _private_property(event: dict, key: str) -> str | None:
+    return event.get("extendedProperties", {}).get("private", {}).get(key)
 
 
 def _content_signature(event: dict, timezone: str) -> str:

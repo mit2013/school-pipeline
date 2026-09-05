@@ -373,3 +373,36 @@ def test_missing_audience_becomes_none():
     client = FakeAnthropicClient(_tool_response_with_audience([_raw()], None))
     events = AnthropicExtractor(client).extract("本文", reference_date=date(2026, 9, 1))
     assert events[0].audience is None
+
+
+def test_notes_are_appended_to_the_system_prompt():
+    """時間割のような資料に書かれていない前提を、設定から渡せること。"""
+    from school_pipeline.extraction.llm_extractor import SYSTEM_PROMPT, build_system_prompt
+
+    prompt = build_system_prompt(["小テストは毎週金曜日に実施される"])
+    assert prompt.startswith(SYSTEM_PROMPT)
+    assert "小テストは毎週金曜日に実施される" in prompt
+
+
+def test_no_notes_leaves_the_prompt_untouched():
+    from school_pipeline.extraction.llm_extractor import SYSTEM_PROMPT, build_system_prompt
+
+    assert build_system_prompt(None) == SYSTEM_PROMPT
+    assert build_system_prompt([]) == SYSTEM_PROMPT
+
+
+def test_extractor_sends_the_notes_to_the_model():
+    client = FakeAnthropicClient(_tool_response([]))
+    AnthropicExtractor(client, notes=["小テストは金曜"]).extract("本文", reference_date=date(2026, 9, 1))
+    assert "小テストは金曜" in client.calls[0]["system"]
+
+
+def test_fingerprint_changes_with_the_notes():
+    """補足情報を直したらキャッシュが外れること。外れないと修正が黙って無視される。"""
+    from school_pipeline.extraction.llm_extractor import extraction_fingerprint
+
+    base = extraction_fingerprint("claude-sonnet-5")
+    changed = extraction_fingerprint("claude-sonnet-5", ["小テストは金曜"])
+    other = extraction_fingerprint("claude-sonnet-5", ["小テストは木曜"])
+    assert base != changed
+    assert changed != other
