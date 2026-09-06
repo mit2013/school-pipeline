@@ -57,6 +57,12 @@ def run_pipeline(
 
     all_events: list[SchoolEvent] = []
     for source in sources:
+        if hasattr(source, "fetch_events"):
+            # 抽出を通さず予定を直接返す取得元(表形式の資料など)。API費用はかからない。
+            structured = source.fetch_events()
+            logger.info("Read %d events directly from %s", len(structured), type(source).__name__)
+            all_events.extend(structured)
+            continue
         for doc in source.fetch():
             source_key = f"{doc.source.source_type}:{doc.source.source_id}"
             content_hash = ExtractionCache.content_hash(doc.text)

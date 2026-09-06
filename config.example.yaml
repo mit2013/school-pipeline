@@ -28,6 +28,17 @@ image_directory: inbox/photos
 # Classroomの投稿など、API非対応の情報を手動でコピペしたテキストファイルを置くフォルダ
 manual_text_directory: inbox/manual
 
+# 教科ごとの授業予定表(Excel)を置くフォルダ。
+# 行が日付に対応した表なので、LLMには渡さず「提出」「小テスト」「チャレ」列を
+# 決め打ちで読む。API費用がかからず、解釈のぶれも起きない。
+xlsx_directory: inbox/xlsx
+# 読み取るシート名(部分一致)。クラス別にシートが分かれている表で、
+# 他クラスの日程を取り込む事故を防ぐために使う。省略すると全シートが対象。
+xlsx_sheets_include:
+  - "2-1"
+# Excel由来の予定に付ける科目名。省略するとファイル名から推測する。
+xlsx_subject: 英語
+
 # Googleカレンダー
 google_credentials_path: secrets/calendar_credentials.json
 google_calendar_token_path: secrets/calendar_token.json

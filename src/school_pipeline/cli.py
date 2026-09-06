@@ -20,6 +20,7 @@ from .sources.gmail_source import GmailAccountConfig, GmailSource
 from .sources.image_source import ImageSource
 from .sources.manual_source import ManualTextSource
 from .sources.pdf_source import PdfSource
+from .sources.xlsx_source import XlsxSource
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
 logger = logging.getLogger(__name__)
@@ -68,7 +69,7 @@ def run(config_path: str, push: bool, force: bool, overwrite_manual: bool, prune
     if not sources:
         click.echo(
             "設定ファイルに有効な取得元がありません"
-            "(gmail_accounts / pdf_directory / image_directory / manual_text_directory)。",
+            "(gmail_accounts / pdf_directory / image_directory / manual_text_directory / xlsx_directory)。",
             err=True,
         )
         sys.exit(1)
@@ -184,6 +185,14 @@ def _build_sources(settings) -> list:
         sources.append(ImageSource(settings.image_directory))
     if settings.manual_text_directory:
         sources.append(ManualTextSource(settings.manual_text_directory))
+    if settings.xlsx_directory:
+        sources.append(
+            XlsxSource(
+                settings.xlsx_directory,
+                sheets_include=settings.xlsx_sheets_include,
+                subject=settings.xlsx_subject,
+            )
+        )
     return sources
 
 

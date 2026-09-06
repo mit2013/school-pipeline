@@ -23,6 +23,12 @@ class Settings:
     pdf_directory: str | None = None
     image_directory: str | None = None
     manual_text_directory: str | None = None
+    # 教科ごとの授業予定表(Excel)を置くフォルダ。LLMを通さず列を決め打ちで読む。
+    xlsx_directory: str | None = None
+    # 読み取り対象のシート名(部分一致)。クラス別にシートが分かれている場合に使う。
+    xlsx_sheets_include: list[str] = field(default_factory=list)
+    # Excelの予定に付ける科目名。省略するとファイル名から推測する。
+    xlsx_subject: str | None = None
     google_credentials_path: str | None = None
     google_calendar_token_path: str = "calendar_token.json"
     calendar_id: str = "primary"
@@ -58,6 +64,9 @@ def load_settings(path: str | Path) -> Settings:
         pdf_directory=data.get("pdf_directory"),
         image_directory=data.get("image_directory"),
         manual_text_directory=data.get("manual_text_directory"),
+        xlsx_directory=data.get("xlsx_directory"),
+        xlsx_sheets_include=list(data.get("xlsx_sheets_include") or []),
+        xlsx_subject=data.get("xlsx_subject"),
         google_credentials_path=data.get("google_credentials_path"),
         google_calendar_token_path=data.get("google_calendar_token_path", "calendar_token.json"),
         calendar_id=data.get("calendar_id", "primary"),
