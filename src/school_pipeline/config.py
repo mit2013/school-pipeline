@@ -23,6 +23,8 @@ class Settings:
     pdf_directory: str | None = None
     image_directory: str | None = None
     manual_text_directory: str | None = None
+    # 抽出済みの予定(JSON)を置くフォルダ。対話セッションで読み取った結果を受け取る。
+    extracted_events_directory: str | None = None
     # 教科ごとの授業予定表(Excel)を置くフォルダ。LLMを通さず列を決め打ちで読む。
     xlsx_directory: str | None = None
     # 読み取り対象のシート名(部分一致)。クラス別にシートが分かれている場合に使う。
@@ -64,6 +66,7 @@ def load_settings(path: str | Path) -> Settings:
         pdf_directory=data.get("pdf_directory"),
         image_directory=data.get("image_directory"),
         manual_text_directory=data.get("manual_text_directory"),
+        extracted_events_directory=data.get("extracted_events_directory"),
         xlsx_directory=data.get("xlsx_directory"),
         xlsx_sheets_include=list(data.get("xlsx_sheets_include") or []),
         xlsx_subject=data.get("xlsx_subject"),

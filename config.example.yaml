@@ -28,6 +28,12 @@ image_directory: inbox/photos
 # Classroomの投稿など、API非対応の情報を手動でコピペしたテキストファイルを置くフォルダ
 manual_text_directory: inbox/manual
 
+# 抽出済みの予定(JSON)を置くフォルダ。
+# 配布物の読み取りを Claude Code などの対話セッションで行い、その結果をここに置くと、
+# Anthropic API を呼ばずにカレンダーへ登録できる(APIキーも不要)。
+# 形式は docs/extraction-format.md を参照。
+extracted_events_directory: inbox/extracted
+
 # 教科ごとの授業予定表(Excel)を置くフォルダ。
 # 行が日付に対応した表なので、LLMには渡さず「提出」「小テスト」「チャレ」列を
 # 決め打ちで読む。API費用がかからず、解釈のぶれも起きない。

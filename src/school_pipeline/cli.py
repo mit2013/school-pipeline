@@ -19,6 +19,7 @@ from .pipeline.usage import CreditLedger, UsageTotals, format_money
 from .sources.gmail_source import GmailAccountConfig, GmailSource
 from .sources.image_source import ImageSource
 from .sources.manual_source import ManualTextSource
+from .sources.json_source import JsonEventsSource
 from .sources.pdf_source import PdfSource
 from .sources.xlsx_source import XlsxSource
 
@@ -69,19 +70,13 @@ def run(config_path: str, push: bool, force: bool, overwrite_manual: bool, prune
     if not sources:
         click.echo(
             "設定ファイルに有効な取得元がありません"
-            "(gmail_accounts / pdf_directory / image_directory / manual_text_directory / xlsx_directory)。",
+            "(gmail_accounts / pdf_directory / image_directory / manual_text_directory / "
+            "extracted_events_directory / xlsx_directory)。",
             err=True,
         )
         sys.exit(1)
 
-    api_key = os.environ.get(settings.anthropic_api_key_env)
-    if not api_key:
-        click.echo(f"環境変数 {settings.anthropic_api_key_env} が設定されていません。", err=True)
-        sys.exit(1)
-    extractor = AnthropicExtractor(
-        AnthropicMessagesClient(api_key=api_key, model=settings.anthropic_model),
-        notes=settings.extraction_notes,
-    )
+    extractor = _build_extractor(settings, sources)
 
     cache = ExtractionCache.load(settings.cache_path)
     result = run_pipeline(
@@ -185,6 +180,8 @@ def _build_sources(settings) -> list:
         sources.append(ImageSource(settings.image_directory))
     if settings.manual_text_directory:
         sources.append(ManualTextSource(settings.manual_text_directory))
+    if settings.extracted_events_directory:
+        sources.append(JsonEventsSource(settings.extracted_events_directory))
     if settings.xlsx_directory:
         sources.append(
             XlsxSource(
@@ -194,6 +191,43 @@ def _build_sources(settings) -> list:
             )
         )
     return sources
+
+
+def _build_extractor(settings, sources):
+    """本文の抽出が必要な取得元があるときだけ、APIを使う抽出器を用意する。
+
+    抽出済みのJSONやExcelしか使わない構成では、Anthropic APIを1回も呼ばない。
+    その場合にAPIキーを要求すると、鍵を持たない人がこのツールを使えなくなる。
+    """
+    if not any(hasattr(source, "fetch") for source in sources):
+        click.echo("本文の抽出が不要な構成です(Anthropic APIは呼び出しません)。")
+        return _NoExtractor()
+
+    api_key = os.environ.get(settings.anthropic_api_key_env)
+    if not api_key:
+        click.echo(
+            f"環境変数 {settings.anthropic_api_key_env} が設定されていません。\n"
+            "抽出済みのJSON(extracted_events_directory)だけを使う場合は、"
+            "設定から本文を読む取得元を外してください。",
+            err=True,
+        )
+        sys.exit(1)
+    return AnthropicExtractor(
+        AnthropicMessagesClient(api_key=api_key, model=settings.anthropic_model),
+        notes=settings.extraction_notes,
+    )
+
+
+class _NoExtractor:
+    """抽出を行わない場合の差し込み。使用量は常にゼロ。"""
+
+    fingerprint = ""
+
+    def __init__(self) -> None:
+        self.usage = UsageTotals()
+
+    def extract(self, text, *, reference_date, source=None):
+        return []
 
 
 def _build_calendar_service(settings):
