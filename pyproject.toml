@@ -3,6 +3,8 @@ name = "school-pipeline"
 version = "0.1.0"
 description = "学校からのメール・配布プリントなどの予定情報を抽出し、Googleカレンダーへ登録するパイプライン"
 requires-python = ">=3.9"
+license = "MIT"
+license-files = ["LICENSE"]
 dependencies = [
     "anthropic>=0.40.0",
     "google-api-python-client>=2.100.0",
