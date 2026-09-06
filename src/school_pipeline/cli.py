@@ -91,7 +91,7 @@ def run(config_path: str, push: bool, force: bool, overwrite_manual: bool, prune
         my_class_aliases=settings.my_class_aliases,
     )
     cache.save(settings.cache_path)
-    _report_usage(extractor.usage, settings)
+    _report_usage(extractor.usage, settings, extraction_used=not isinstance(extractor, _NoExtractor))
     _print_report(result)
 
     if not result.events:
@@ -457,8 +457,12 @@ if __name__ == "__main__":
     main()
 
 
-def _report_usage(usage: UsageTotals, settings) -> None:
+def _report_usage(usage: UsageTotals, settings, extraction_used: bool = True) -> None:
     """この実行でかかったAPI費用と、残高の目安を表示する。"""
+    if not extraction_used:
+        # 抽出済みのJSONや表形式の資料だけを使う構成。そもそもAPIを使っていない。
+        click.echo("\nAPI呼び出し: 0回(本文の抽出を行わない構成のため課金はありません)")
+        return
     if usage.calls == 0:
         click.echo("\nAPI呼び出し: 0回(すべてキャッシュから取得したため課金はありません)")
         return
